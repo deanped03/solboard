@@ -22033,11 +22033,18 @@
             }
 
             function ClaimDayBanner() {
-                // Count insurance-billing appointments not yet submitted (exclude direct pay,
-                // which is handled separately in DirectPaySection).
+                // Not Submitted count — every appointment on the day with billing !== 'submitted',
+                // i.e. exactly matchesClaimFilter's 'notSubmitted' branch: Direct-Pay rows and
+                // unsigned notes included, so the button's count is the size of the list it
+                // filters to and it shows whenever that list would be non-empty.
+                // History: until 2026-10-08 this excluded direct pay ("handled separately in
+                // DirectPaySection", 2026-08-09), which left the button hidden on days whose
+                // only unsubmitted rows were Direct-Pay (and let the filter strand an empty list
+                // after the last insurance row was submitted). That exclusion was dropped on
+                // 2026-10-08. DirectPaySection itself is unchanged.
                 // Reads the unfiltered totals (not submtd/notSubmitted) so every stat
                 // stays visible and clickable regardless of which filter is active.
-                const notSub = totalNotSubmitted.filter(a => a.method !== 'direct').length;
+                const notSub = totalNotSubmitted.length;
                 // Stage 3, Part 2 — this row now also carries Total/Not Signed/Signed,
                 // which apply regardless of claim-submission activity (a direct-pay-only
                 // day still has signing status to show). Gate is "any appointments
