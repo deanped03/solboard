@@ -3398,9 +3398,10 @@
        NotSubmitted/Unsigned/Signed + .cds-day-sm + .cds-active) removed
        Stage 3, Part 2 — BillingView's day banner row (ClaimDayBanner)
        now shares .pv-stat/.pv-stat-* with ProviderView's SummaryBar
-       instead of its own parallel class family; Denied/Resubmitted are
-       gone as standalone stats (Resubmitted folds into Pending, Denied
-       is unshown, both still settable per-row via BRow's ClaimBadge).
+       instead of its own parallel class family. Denied/Resubmitted were
+       dropped as standalone stats then, and are back as their own filter
+       stats (2026-10-07) — Pending no longer folds Resubmitted in; both
+       are still settable per-row via BRow's ClaimBadge.
        .claim-day-banner (the row's own flex container) is unaffected —
        still in use, see below. .cds-paid-amt (the small "· $X,XXX.XX"
        aggregate) also stays — Billing-specific, kept on the converted
@@ -3453,15 +3454,44 @@
             color: #FFFFFF;
         }
 
+        /* ── Resubmitted (2026-10-07) — the in-progress claim state, so it
+       reuses the exact blue-gray this file already uses for Resubmitted
+       everywhere else (.csb-resub on BRow's own badge: #3D768A text,
+       #7494AA border) rather than a new hex. Same active pattern as the
+       other members: fill = the text color, white text. ── */
+        .pv-stat-resub {
+            color: #3D768A;
+            border-color: #7494AA;
+        }
+
+        .pv-stat-resub.pv-stat-active {
+            background: #3D768A;
+            color: #FFFFFF;
+        }
+
         /* ── New color, Stage 3 Part 2 — Total isn't a status (unlike the
        red/gold/green members), so it needed a neutral variant that
        didn't previously exist in this family. Same brand-primary blue
-       the old .cds-total used, at the same .7 opacity. No .pv-stat-active
-       pairing — Total is inert (matches ProviderView's own Total, which
-       is likewise non-interactive), so it never reaches that state. ── */
+       the old .cds-total used, at the same .7 opacity. Total is now the
+       "show all" button in BillingView's banner (2026-10-07), so it gets
+       an active pairing too — full opacity, since the .7 would read as
+       disabled on the one state meant to stand out. ProviderView's own
+       Total is unchanged and still inert. ── */
         .pv-stat-blue {
             color: var(--brand-primary);
             border-color: var(--brand-primary);
+            opacity: .7;
+        }
+
+        .pv-stat-blue.pv-stat-active {
+            background: var(--brand-primary);
+            color: #FFFFFF;
+            opacity: 1;
+        }
+
+        /* Same hover dim every other .pv-stat gets — the opacity:1 above
+       would otherwise out-rank .pv-stat:hover for this one member. */
+        .pv-stat-blue.pv-stat-active:hover {
             opacity: .7;
         }
 
@@ -21774,20 +21804,31 @@
             // ── Filtered data feeding the three row sections below — predicate-
             // function form (not a nested ternary chain) so it structurally
             // matches ProviderView's matchesPostFilter, which this mirrors.
-            // 'Pending' folds in Resubmitted, same as Provider's claimPend —
-            // the displayed Pending count does the same fold (see
-            // ClaimDayBanner's `pend` below), so what you see is what you
-            // filter to. ──
+            // Pending / Denied / Resubmitted / Paid are mutually exclusive
+            // (2026-10-07) — Pending is blank-or-'Pending' only, no longer
+            // folding Resubmitted in, so each submitted claim is counted
+            // by exactly one of those four buttons. The displayed counts
+            // (ClaimDayBanner's `pend`/`denied`/`resub`/`paid` below) use
+            // the same definitions, so what you see is what you filter to. ──
             function matchesClaimFilter(a) {
                 if (!claimFilter) return true;
                 if (claimFilter === 'notSubmitted') return a.billing !== 'submitted';
                 if (claimFilter === 'submitted') return a.billing === 'submitted';
                 if (claimFilter === 'notSigned') return !a.out;
                 if (claimFilter === 'signed') return !!a.out;
-                if (claimFilter === 'Pending') return a.billing === 'submitted' && (!a.claimStatus || a.claimStatus === 'Pending' || a.claimStatus === 'Resubmitted');
                 return a.billing === 'submitted' && (a.claimStatus || 'Pending') === claimFilter;
             }
             const filteredAppts = activeAppts.filter(matchesClaimFilter);
+            // Auto-clear a stale filter (2026-10-07) — if the active filter no
+            // longer matches anything (its button's count dropped to 0, e.g. the
+            // last Denied claim got re-statused), that button has vanished and the
+            // list would sit empty with nothing to click. Reset so the full list
+            // returns. Generic on purpose — covers every filter button, not one
+            // status. A layout effect (not a plain one) so the empty list never
+            // paints for a frame before the reset lands.
+            React.useLayoutEffect(() => {
+                if (claimFilter && filteredAppts.length === 0) setClaimFilter(null);
+            }, [claimFilter, filteredAppts.length]);
             const submtd = filteredAppts.filter(a => a.billing === 'submitted');
             const notSubmitted = filteredAppts.filter(a => a.billing !== 'submitted');
             const signedReady = notSubmitted.filter(a => a.out);   // signed → Submit Claim available (CPT optional)
@@ -21848,12 +21889,14 @@
                 // day still has signing status to show). Gate is "any appointments
                 // today" now, not the old claim-only "(!totalSubmtd.length && !notSub)".
                 if (!activeAppts.length) return null;
-                // Resubmitted folds into Pending here (no separate stat any more —
-                // Denied/Resubmitted removed from this row, Stage 3 Part 2), same as
-                // ProviderView's SummaryBar claimPend — and matchesClaimFilter's
-                // 'Pending' branch folds it in the same way, so the displayed count
-                // and what clicking it actually shows always agree.
-                const pend = totalSubmtd.filter(a => !a.claimStatus || a.claimStatus === 'Pending' || a.claimStatus === 'Resubmitted').length;
+                // Pending / Denied / Resubmitted / Paid are mutually exclusive
+                // (2026-10-07) and match matchesClaimFilter's definitions exactly,
+                // so the displayed count and what clicking it shows always agree.
+                // Unlike ProviderView's SummaryBar claimPend, Pending here does NOT
+                // fold Resubmitted in — Resubmitted has its own button now.
+                const pend = totalSubmtd.filter(a => !a.claimStatus || a.claimStatus === 'Pending').length;
+                const denied = totalSubmtd.filter(a => a.claimStatus === 'Denied').length;
+                const resub = totalSubmtd.filter(a => a.claimStatus === 'Resubmitted').length;
                 const paid = totalSubmtd.filter(a => a.claimStatus === 'Paid').length;
                 const paidAmt = totalSubmtd.reduce((s, a) => s + (parseFloat(a.claimPaidAmount) || 0), 0);
                 // Not Signed / Signed replace the old standalone "Unsigned Notes" stat
@@ -21864,10 +21907,12 @@
                 const notSignedCount = totalAppts - signedCount;
                 return (
                     <div className="claim-day-banner">
-                        {/* Total isn't a filter target (matches ProviderView's own Total,
-                which is likewise inert) — cursor override keeps hover honest since
-                .pv-stat's base rule defaults every member to cursor:pointer. */}
-                        <span className="pv-stat pv-stat-blue" style={{ cursor: 'default' }}>
+                        {/* Total is the "show all" button (2026-10-07): clears whatever
+                status filter is active, and reads as active itself whenever no
+                filter is. Not a toggle — there's no "un-show-all" state to
+                click back out to. */}
+                        <span className={`pv-stat pv-stat-blue${!claimFilter ? ' pv-stat-active' : ''}`}
+                            onClick={() => setClaimFilter(null)} title="Show all appointments for the day">
                             📅 {totalAppts} Total
                         </span>
                         {notSignedCount > 0 && (
@@ -21891,6 +21936,18 @@
                             <span className={`pv-stat pv-stat-gold${claimFilter === 'Pending' ? ' pv-stat-active' : ''}`}
                                 onClick={() => toggleClaimFilter('Pending')} title="Filter to claims still pending">
                                 ⏳ {pend} Pending
+                            </span>
+                        )}
+                        {denied > 0 && (
+                            <span className={`pv-stat pv-stat-red${claimFilter === 'Denied' ? ' pv-stat-active' : ''}`}
+                                onClick={() => toggleClaimFilter('Denied')} title="Filter to denied claims">
+                                ✗ {denied} Denied
+                            </span>
+                        )}
+                        {resub > 0 && (
+                            <span className={`pv-stat pv-stat-resub${claimFilter === 'Resubmitted' ? ' pv-stat-active' : ''}`}
+                                onClick={() => toggleClaimFilter('Resubmitted')} title="Filter to resubmitted claims">
+                                🔄 {resub} Resubmitted
                             </span>
                         )}
                         {paid > 0 && (
