@@ -21229,6 +21229,7 @@
              · Insurance / billing method info (editable)
              · Messages log (viewable + addable by biller)
              · Clinic note status (read-only badge)
+             · ↩ Undo claim submission, on any submitted claim (2026-10-08)
            Does NOT replace ClaimSubmitModal for direct-pay claim entry.
         ════════════════════════════════════════════════════════════════ */
         function BillerApptModal({ appt, onSave, onUpdate, onClose, patientDb }) {
@@ -21282,6 +21283,20 @@
                     return;
                 }
                 doSave();
+            }
+
+            // Billing-side Undo for a submitted claim (2026-10-08) — same button,
+            // wording and effect as ClaimSubmitModal's ↩ Undo (billing → 'pending';
+            // out, claimSubmittedDate, claimStatus etc. left exactly as they were),
+            // so any submitted claim can be undone at any age, not only the ones
+            // Appointment Flow's today-only window can still reach. Written onto the
+            // appointment as it was when this modal opened (plus the two thread
+            // arrays this modal already persists as you go) — NOT onto d, so unsaved
+            // form edits (e.g. Insurance Carrier) can't be saved through here around
+            // attemptSave's warning. Closes the modal via onSave, like ClaimSubmitModal's
+            // Undo closes its modal.
+            function undoClaimSubmission() {
+                onSave({ ...appt, comms: d.comms, intakeUpdates: d.intakeUpdates, billing: 'pending' });
             }
 
             // d.comms synced with readBy updates in useEffect above
@@ -21442,6 +21457,12 @@
 
                         </div>
                         <div className="m-foot">
+                            {d.billing === 'submitted' && (
+                                <button className="csm-submit-undo" title="Undo claim submission"
+                                    style={{ marginRight: 'auto' }} onClick={undoClaimSubmission}>
+                                    ↩ Undo
+                                </button>
+                            )}
                             <button className="btn btn-s" onClick={onClose}>Cancel</button>
                             {/* Patient Insurance Carrier now lives in d.insuranceCarrier —
                                 appointment-level (2026-08-26), part of the same onSave
