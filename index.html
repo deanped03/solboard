@@ -12439,6 +12439,11 @@
 
         const IS_GAS = typeof google !== 'undefined' && google.script && google.script.run;
 
+        // How often the open day/week re-reads from the Sheet in the background
+        // (the interval in the main component). Was 60 s; 15 min since 2026-10-08.
+        // The header ⟳ button still refreshes immediately and is unaffected.
+        const DATA_REFRESH_MS = 15 * 60 * 1000;
+
         function gsr(fnName, ...args) {
             if (!IS_GAS) return Promise.reject(new Error('Not running in Apps Script context'));
             return new Promise((resolve, reject) => {
@@ -22891,8 +22896,8 @@
             // inFlightRef: keys with a fetch currently pending (added when a fetch
             // effect below issues its gsr() call, removed once that call settles —
             // separate from fetchedRef's "has this ever been fetched" bookkeeping).
-            // At a 60s poll interval a fetch can legitimately still be in flight
-            // when the next tick fires; this lets the interval skip re-triggering
+            // A fetch can legitimately still be in flight when the next
+            // DATA_REFRESH_MS tick fires; this lets the interval skip re-triggering
             // THAT key for this tick without touching any other key's refresh.
             const inFlightRef = useRef(new Set());
             const editingRef = useRef(false);
@@ -22917,13 +22922,13 @@
                         ? (view === 'provider' ? `week:${prov}:${weekStart(date)}` : `allweek:${weekStart(date)}`)
                         : dkey(prov, date);
                     // Block refresh for this key specifically while its own fetch is
-                    // still in flight — at 60s cadence a slow/delayed request can
+                    // still in flight — a slow/delayed request can
                     // still be pending when the next tick fires; this skips only
                     // THIS key for THIS tick, every other key still refreshes normally.
                     if (inFlightRef.current.has(k)) return;
                     fetchedRef.current.delete(k);
                     setRefreshTick(t => t + 1);
-                }, 60000);   // 60 seconds
+                }, DATA_REFRESH_MS);
                 return () => clearInterval(id);
             }, [initLoading, prov, date, period, view]);
 
