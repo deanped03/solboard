@@ -15098,7 +15098,9 @@
             const totalCount = allRows.length;
             const paidCount = allRows.filter(r => r.claimStatus === 'Paid').length;
             const pendCount = allRows.filter(r => !r.claimStatus || r.claimStatus === 'Pending').length;
-            const totalPaid = allRows.reduce((s, r) => s + (parseFloat(r.claimPaidAmount) || 0), 0);
+            // Only Paid claims count — a stale amount left on a Denied/Pending/Resubmitted
+            // claim (e.g. after an Undo + resubmit) is not money received (2026-10-08).
+            const totalPaid = allRows.filter(r => r.claimStatus === 'Paid').reduce((s, r) => s + (parseFloat(r.claimPaidAmount) || 0), 0);
             const totalDep = allRows.reduce((s, r) => s + (parseFloat(r.claimDepositAmount) || 0), 0);
 
             // ── Helpers ──────────────────────────────────────────────
@@ -22025,7 +22027,9 @@
                 const denied = totalSubmtd.filter(a => a.claimStatus === 'Denied').length;
                 const resub = totalSubmtd.filter(a => a.claimStatus === 'Resubmitted').length;
                 const paid = totalSubmtd.filter(a => a.claimStatus === 'Paid').length;
-                const paidAmt = totalSubmtd.reduce((s, a) => s + (parseFloat(a.claimPaidAmount) || 0), 0);
+                // Same Paid-only rule as the Claims Ledger total (2026-10-08): stale amounts on
+                // non-Paid claims are not summed.
+                const paidAmt = totalSubmtd.filter(a => a.claimStatus === 'Paid').reduce((s, a) => s + (parseFloat(a.claimPaidAmount) || 0), 0);
                 // Not Signed / Signed replace the old standalone "Unsigned Notes" stat
                 // with the same Not Signed/Signed pair ProviderView's SummaryBar uses —
                 // signedCount is exactly the old unsignedCount's complement, same field.
