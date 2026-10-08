@@ -12443,6 +12443,9 @@
         // (the interval in the main component). Was 60 s; 15 min since 2026-10-08.
         // The header ⟳ button still refreshes immediately and is unaffected.
         const DATA_REFRESH_MS = 15 * 60 * 1000;
+        // A tab hidden for longer than this refreshes the open day/week once when it
+        // becomes visible again (a shorter absence refreshes nothing).
+        const HIDDEN_REFRESH_MIN_MS = 5 * 60 * 1000;
 
         function gsr(fnName, ...args) {
             if (!IS_GAS) return Promise.reject(new Error('Not running in Apps Script context'));
@@ -22906,9 +22909,20 @@
             // callback always sees the current value without a stale closure.
             useEffect(() => { editingRef.current = editing; }, [editing]);
 
+            // Latest navigation state for the refresh timer below, so the timer can
+            // stay ONE steady interval (never torn down and restarted by navigation)
+            // yet still refresh whichever day/week is open at the moment it fires.
+            const navRef = useRef({ prov, date, period, view });
+            navRef.current = { prov, date, period, view };
+
+            // Background refresh of the open day/week (2026-10-08). One interval for the
+            // life of the app, ticking every DATA_REFRESH_MS regardless of navigation,
+            // plus a single catch-up refresh when the tab comes back after being hidden
+            // longer than HIDDEN_REFRESH_MIN_MS. Both go through the same skip rules.
             useEffect(() => {
                 if (!IS_GAS || initLoading) return;
-                const id = setInterval(() => {
+
+                function refreshOpenView() {
                     // Block refresh whenever any modal / overlay is open
                     if (document.querySelector('.overlay, .cal-overlay')) return;
                     // Block refresh while the user is actively editing the date field
@@ -22918,6 +22932,7 @@
                     if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
                     // Block refresh while focus is inside any contentEditable element
                     if (document.activeElement && document.activeElement.isContentEditable) return;
+                    const { prov, date, period, view } = navRef.current;
                     const k = period === 'week'
                         ? (view === 'provider' ? `week:${prov}:${weekStart(date)}` : `allweek:${weekStart(date)}`)
                         : dkey(prov, date);
@@ -22928,9 +22943,27 @@
                     if (inFlightRef.current.has(k)) return;
                     fetchedRef.current.delete(k);
                     setRefreshTick(t => t + 1);
-                }, DATA_REFRESH_MS);
-                return () => clearInterval(id);
-            }, [initLoading, prov, date, period, view]);
+                }
+
+                const id = setInterval(refreshOpenView, DATA_REFRESH_MS);
+
+                let hiddenAt = null;
+                function onVisibility() {
+                    if (document.visibilityState === 'hidden') {
+                        if (hiddenAt === null) hiddenAt = Date.now();
+                        return;
+                    }
+                    const hiddenFor = hiddenAt === null ? 0 : Date.now() - hiddenAt;
+                    hiddenAt = null;
+                    if (hiddenFor > HIDDEN_REFRESH_MIN_MS) refreshOpenView();
+                }
+                document.addEventListener('visibilitychange', onVisibility);
+
+                return () => {
+                    clearInterval(id);
+                    document.removeEventListener('visibilitychange', onVisibility);
+                };
+            }, [initLoading]);
 
             useEffect(() => {
                 if (!IS_GAS) {
