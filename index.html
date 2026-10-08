@@ -20383,16 +20383,19 @@
             const isSubmitted = localAppt.billing === 'submitted';
 
             function doHandleSubmit() {
-                // Auto-stamp submitted date and default status on first submission
+                // Every not-submitted → submitted transition (first-time or a
+                // resubmit after Undo) stamps today's date and resets status to
+                // Pending, so a claim Undone while Denied/Paid/etc. starts the
+                // new submission clean (2026-10-08). canSubmit already excludes
+                // billing === 'submitted', so this never runs on an already-
+                // submitted claim. Other claim fields (paid amount, claim ID...)
+                // are deliberately left as they are.
                 const today = new Date().toISOString().slice(0, 10);
-                const submittedDate = claimSubmittedDate || today;
-                const status = claimStatus || 'Pending';
-                if (!claimSubmittedDate) setClaimSubmittedDate(submittedDate);
-                if (!claimStatus) setClaimStatus(status);
+                const submittedDate = today;
                 const savePromise = onUpdate(buildFinalAppt({
                     billing: 'submitted',
                     claimSubmittedDate: submittedDate,
-                    claimStatus: status,
+                    claimStatus: 'Pending',
                 }));
                 // Attribution stamp (Stage 1's saveClaimSubmission) — fired only
                 // after the primary save confirms success, never before and
@@ -22360,8 +22363,11 @@
                             action={a.method !== 'direct'
                                 ? <button className="sub-btn ready" onClick={e => {
                                     e.stopPropagation();
+                                    // Always today (2026-10-08), not the old date: this button
+                                    // is only shown for not-yet-submitted claims, so a resubmit
+                                    // after Undo gets a fresh date, same as ClaimSubmitModal.
                                     const today = new Date().toISOString().slice(0, 10);
-                                    const submittedDate = a.claimSubmittedDate || today;
+                                    const submittedDate = today;
                                     scrollSafeUpdate({
                                         ...a,
                                         billing: 'submitted',
