@@ -12742,6 +12742,23 @@
             });
         }
 
+        /* ── Unsigning a note (2026-10-08) — one rule for every provider-side
+           Undo (ProviderView's .pv-sign-undo and ProviderApptModal's Undo
+           Signature), so a submitted claim can never be left with an unsigned
+           note: { out: false, billing: 'submitted' }. Returns the billing value
+           an unsign should write, or null when the unsign must be BLOCKED.
+             'submitted' -> null (Billing has to undo the submission first —
+                            ClaimSubmitModal's ↩ Undo is what flips it back to
+                            'pending'; this never does).
+             'ready'     -> 'pending' ('ready' means CPT + signed everywhere else
+                            billing is written, so it can't outlive the signature).
+             anything else is returned as-is. ── */
+        const UNSIGN_BLOCKED_MSG = 'This claim has already been submitted. Ask Billing to undo the claim submission first, then you can unsign this note.';
+        function billingAfterUnsign(billing) {
+            if (billing === 'submitted') return null;
+            return billing === 'ready' ? 'pending' : billing;
+        }
+
         /**
          * Normalize a patient name for comparison: lowercase, trim, collapse
          * internal whitespace. Prevents "Bob  Boone" vs "Bob Boone" mismatches.
@@ -14554,6 +14571,7 @@
             const [commTo, setCommTo] = useState(() => defaultCommTo(appt, 'provider'));
             const [rxModal, setRxModal] = useState(false);
             const [cptModal, setCptModal] = useState(false);
+            const [signBlocked, setSignBlocked] = useState(false);   // Undo Signature was refused (claim already submitted)
             const commListRef = React.useRef(null);
 
             // Determine "To" options based on current user's role
@@ -14583,10 +14601,17 @@
             // Fall back to local comms if local state has more entries (user sent multiple
             // messages before the parent prop cycled back).
             // Send is FINAL — persist immediately without closing modal
-            const sendComment = makeSendComment(commNote, commTo, appt, comms, setComms, setCommNote, onUpdate, { rxMeds, cpt, out });
+            // Unsigning here follows the same rule as ProviderView's Undo
+            // (billingAfterUnsign, 2026-10-08) — but only when the provider
+            // actually unsigned in THIS session (appt.out was true, out is now
+            // false), never as a side effect on a row that was already unsigned
+            // when the modal opened. A submitted claim can't get here: the Undo
+            // Signature button below refuses it.
+            const billing = (appt.out && !out) ? (billingAfterUnsign(appt.billing) ?? appt.billing) : appt.billing;
+            const sendComment = makeSendComment(commNote, commTo, appt, comms, setComms, setCommNote, onUpdate, { rxMeds, cpt, out, billing });
 
             function handleSave() {
-                onSave({ ...appt, comms, rxMeds, cpt, out });
+                onSave({ ...appt, comms, rxMeds, cpt, out, billing });
             }
 
             return (
@@ -14756,7 +14781,10 @@
                                         ) : out ? (
                                             <>
                                                 <span style={{ background: '#FBFBF3', border: '1px solid var(--success)', color: 'var(--success)', borderRadius: 0, padding: '6px 16px', fontSize: 14, fontWeight: 800 }}>✓ Note Signed</span>
-                                                <button className="btn btn-s btn-sm" onClick={() => setOut(false)}>↩ Undo Signature</button>
+                                                <button className="btn btn-s btn-sm" onClick={() => {
+                                                    if (billingAfterUnsign(appt.billing) === null) { setSignBlocked(true); return; }
+                                                    setOut(false);
+                                                }}>↩ Undo Signature</button>
                                             </>
                                         ) : (
                                             <button
@@ -14767,6 +14795,9 @@
                                             </button>
                                         )}
                                     </div>
+                                    {signBlocked && out && (
+                                        <div style={{ flexBasis: '100%', fontSize: 12, color: '#791F1F', fontStyle: 'italic' }}>{UNSIGN_BLOCKED_MSG}</div>
+                                    )}
                                 </div>
                             </div>
                         </div>
@@ -17788,6 +17819,21 @@
                 dismissSaveFailure(f.key);
                 saveCpt(f.appt, f.codes);
             }
+
+            // ── Blocked-unsign notices (2026-10-08) — same bottom-right stack as
+            // the save failures above (it's ProviderView's own surface for
+            // problems around signing a note), and auto-dismissing like the
+            // file's other toasts. One per appointment; clicking Undo again
+            // just replaces it. ──
+            const [signBlocks, setSignBlocks] = useState([]);   // { key, appt }
+            function blockUnsign(appt) {
+                const key = appt.id + ':' + Date.now();
+                setSignBlocks(prev => [...prev.filter(b => b.appt.id !== appt.id), { key, appt }]);
+                setTimeout(() => setSignBlocks(prev => prev.filter(b => b.key !== key)), 10000);
+            }
+            function dismissSignBlock(key) {
+                setSignBlocks(prev => prev.filter(b => b.key !== key));
+            }
             function saveRx(appt, meds) {
                 // Clear biller alert when Provider explicitly saves — they've reviewed and acted
                 onUpdate({ ...appt, rxMeds: meds, rxBillerAlert: false });
@@ -18182,7 +18228,11 @@
                                                     {a.out ? (
                                                         <>
                                                             <button className="pv-sign-btn signed" style={{ cursor: 'default' }}>✓ Signed</button>
-                                                            <button className="pv-sign-undo" onClick={() => onUpdate({ ...a, out: false })}>↩ Undo</button>
+                                                            <button className="pv-sign-undo" onClick={() => {
+                                                                const nextBilling = billingAfterUnsign(a.billing);
+                                                                if (nextBilling === null) { blockUnsign(a); return; }
+                                                                onUpdate({ ...a, out: false, billing: nextBilling });
+                                                            }}>↩ Undo</button>
                                                         </>
                                                     ) : (
                                                         <button className="pv-sign-btn unsigned"
@@ -18301,8 +18351,9 @@
                         />
                     )}
 
-                    {/* ── Save-failure banner (CPT Codes / Mark Note Signed background saves) ── */}
-                    {saveFailures.length > 0 && (
+                    {/* ── Save-failure banner (CPT Codes / Mark Note Signed background saves),
+                       plus the blocked-unsign notices below it (same cards, no Retry) ── */}
+                    {(saveFailures.length > 0 || signBlocks.length > 0) && (
                         <div className="pv-fail-stack">
                             {saveFailures.map(f => {
                                 const what = f.needsCpt && f.needsSign ? 'CPT codes and note signature'
@@ -18324,6 +18375,17 @@
                                     </div>
                                 );
                             })}
+                            {signBlocks.map(b => (
+                                <div key={b.key} className="pv-fail-card">
+                                    <div className="pv-fail-hd">
+                                        <div className="pv-fail-title">⚠ Can't unsign yet</div>
+                                        <button className="pv-fail-close" onClick={() => dismissSignBlock(b.key)} title="Dismiss">×</button>
+                                    </div>
+                                    <div className="pv-fail-body" style={{ marginBottom: 0 }}>
+                                        <strong><PatientName name={b.appt.patient} state={b.appt.patientState} /></strong> — {UNSIGN_BLOCKED_MSG}
+                                    </div>
+                                </div>
+                            ))}
                         </div>
                     )}
 
@@ -19107,13 +19169,16 @@
 
            NEW this pass — clamped against a real, reachable edge case,
            not just the happy path: ProviderView's own "Mark Note Signed"
-           Undo button (.pv-sign-undo) does `onUpdate({ ...a, out: false })`
-           — it flips a signed note back to unsigned WITHOUT resetting
-           billing away from 'submitted'. That's a real, intentional user
-           action (undo a signature, e.g. to correct it), not a data bug,
-           and it means submittedAppts.length CAN exceed S on a given day,
-           which would make NS negative — invalid stroke-dasharray, and a
-           broken ring. submittedWithinSigned = Math.min(submittedAppts.
+           Undo button (.pv-sign-undo) used to do `onUpdate({ ...a, out: false })`
+           — it flipped a signed note back to unsigned WITHOUT resetting
+           billing away from 'submitted' — and that means submittedAppts.length
+           CAN exceed S on a given day, which would make NS negative —
+           invalid stroke-dasharray, and a broken ring. As of 2026-10-08 that
+           Undo (and ProviderApptModal's Undo Signature) refuse to unsign a
+           submitted claim (billingAfterUnsign), but this clamp STAYS as a
+           defensive guard: an unsigned+submitted row can still arrive via
+           older data, a direct Sheet edit, or a stale client.
+           submittedWithinSigned = Math.min(submittedAppts.
            length, S) clamps this: the "un-signed after being submitted"
            backlog simply doesn't get outer-ring color until the note is
            re-signed, rather than corrupting the whole ring. ════════════ */
