@@ -12397,6 +12397,23 @@
             return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
         })();
 
+        // Today's calendar date as YYYY-MM-DD in America/New_York (2026-10-08). Explicit
+        // timeZone, so it never depends on the device's own zone and matches Code.js
+        // (appsscript.json timeZone is America/New_York — _fmtDate(new Date()), the live
+        // window and the table window all use that same "today"). Replaces the old
+        // `new Date().toISOString().slice(0, 10)` stamps, which are UTC and so read as
+        // tomorrow from 8 PM (7 PM in winter) to midnight Eastern. Business dates only —
+        // true timestamps stay UTC on the server. Not tied to TODAY above, which is
+        // fixed at page load from the device's own zone.
+        const _etDateFmt = new Intl.DateTimeFormat('en-US', {
+            timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit',
+        });
+        function todayET() {
+            const p = {};
+            _etDateFmt.formatToParts(new Date()).forEach(x => { p[x.type] = x.value; });
+            return `${p.year}-${p.month}-${p.day}`;
+        }
+
         // Solrei logo — keep your existing embedded base64 here. For brevity in this
         // response the constant is defined empty; paste the ORIGINAL EMBEDDED_LOGO
         // string from your current file into this exact slot so the header logo
@@ -16705,14 +16722,14 @@
 
             function toggleCollected(checked) {
                 const newFailed = checked ? false : paymentFailed;
-                const newDate = checked && !paymentDate ? new Date().toISOString().slice(0, 10) : (!checked && !newFailed ? '' : paymentDate);
+                const newDate = checked && !paymentDate ? todayET() : (!checked && !newFailed ? '' : paymentDate);
                 setPaymentCollected(checked);
                 setPaymentFailed(newFailed);
                 setPaymentDate(newDate);
             }
             function toggleFailed(checked) {
                 const newCollected = checked ? false : paymentCollected;
-                const newDate = checked && !paymentDate ? new Date().toISOString().slice(0, 10) : (!checked && !newCollected ? '' : paymentDate);
+                const newDate = checked && !paymentDate ? todayET() : (!checked && !newCollected ? '' : paymentDate);
                 setPaymentFailed(checked);
                 setPaymentCollected(newCollected);
                 setPaymentDate(newDate);
@@ -20392,7 +20409,7 @@
                 // billing === 'submitted', so this never runs on an already-
                 // submitted claim. Other claim fields (paid amount, claim ID...)
                 // are deliberately left as they are.
-                const today = new Date().toISOString().slice(0, 10);
+                const today = todayET();
                 const submittedDate = today;
                 const savePromise = onUpdate(buildFinalAppt({
                     billing: 'submitted',
@@ -20721,7 +20738,7 @@
                                                             paymentCollected: checked,
                                                             paymentFailed: checked ? false : localAppt.paymentFailed,
                                                             paymentDate: checked && !localAppt.paymentDate
-                                                                ? new Date().toISOString().slice(0, 10)
+                                                                ? todayET()
                                                                 : (!checked && !localAppt.paymentFailed ? '' : localAppt.paymentDate),
                                                         };
                                                         setLocalAppt(newLocal);
@@ -20742,7 +20759,7 @@
                                                             paymentFailed: checked,
                                                             paymentCollected: checked ? false : localAppt.paymentCollected,
                                                             paymentDate: checked && !localAppt.paymentDate
-                                                                ? new Date().toISOString().slice(0, 10)
+                                                                ? todayET()
                                                                 : (!checked && !localAppt.paymentCollected ? '' : localAppt.paymentDate),
                                                         };
                                                         setLocalAppt(newLocal);
@@ -21173,7 +21190,7 @@
                                                                 paymentCollected: checked,
                                                                 paymentFailed: checked ? false : a.paymentFailed,
                                                                 paymentDate: checked && !a.paymentDate
-                                                                    ? new Date().toISOString().slice(0, 10)
+                                                                    ? todayET()
                                                                     : (!checked && !a.paymentFailed ? '' : a.paymentDate),
                                                             });
                                                         }} />
@@ -21188,7 +21205,7 @@
                                                                 paymentFailed: checked,
                                                                 paymentCollected: checked ? false : a.paymentCollected,
                                                                 paymentDate: checked && !a.paymentDate
-                                                                    ? new Date().toISOString().slice(0, 10)
+                                                                    ? todayET()
                                                                     : (!checked && !a.paymentCollected ? '' : a.paymentDate),
                                                             });
                                                         }} />
@@ -22370,7 +22387,7 @@
                                     // Always today (2026-10-08), not the old date: this button
                                     // is only shown for not-yet-submitted claims, so a resubmit
                                     // after Undo gets a fresh date, same as ClaimSubmitModal.
-                                    const today = new Date().toISOString().slice(0, 10);
+                                    const today = todayET();
                                     const submittedDate = today;
                                     scrollSafeUpdate({
                                         ...a,
