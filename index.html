@@ -3241,7 +3241,8 @@
             }
         }
 
-        /* Single vertical column of all 6 items (incl. Total, redundant with
+        /* Single vertical column of all 6 items — up to 8 when the day has Denied/
+       Resubmitted claims (2026-10-08) (incl. Total, redundant with
        the ring's own center total but kept here since this IS the width
        tier that can't afford to drop it) — same reasoning as before
        (2026-08-25): at the real ~150-247px card width a two-column split
@@ -3261,7 +3262,8 @@
 
         /* Two-column "flanking the ring" layout (2026-08-29), >768px default —
        Total omitted here since the ring's own center text already shows it;
-       Unsigned/Signed left, Not Filed/Pending/Paid right. Reuses
+       Unsigned/Signed left, Not Filed/Pending/Paid right (plus Denied and
+       Resubmitted between Pending and Paid on days that have any, 2026-10-08). Reuses
        .wkdr-legend-item/.wkdr-dot verbatim for each row's own styling, so
        only the column container itself needs new rules. min-width: 0 for
        the same reason .wk-col-hd itself needs it — without it a flex
@@ -11716,7 +11718,7 @@
          mobile override above, in this SAME @media block, so the two
          thresholds can never disagree: below this exact breakpoint, fall
          back to the existing single-column legend (.wkdr-legend, all 6
-         items incl. Total) instead of the >768px two-flank layout. */
+         items incl. Total, plus Denied/Resubmitted when present) instead of the >768px two-flank layout. */
             .wkdr-flank {
                 display: none;
             }
@@ -19152,20 +19154,26 @@
            unchanged in that respect — only what's INSIDE it is new.
 
            Inner ring = Post-Visit (Unsigned/Signed), outer ring = Billing
-           (Not Submitted/Pending/Paid), outer ring colored only across
-           the Signed fraction, angularly aligned to start where the
-           inner ring's Signed arc starts. Ring geometry (r/stroke-width)
-           reuses the design reference's own viewBox="0 0 92 92" numbers
-           verbatim — only the SVG's displayed width/height and the
-           center text's font-size are independently adjusted (see below),
-           not the underlying ring proportions.
+           (Not Submitted/Pending/Denied/Resubmitted/Paid, clockwise), outer
+           ring colored only across the Signed fraction, angularly aligned
+           to start where the inner ring's Signed arc starts. Ring geometry
+           (r/stroke-width) reuses the design reference's own viewBox="0 0 92
+           92" numbers verbatim — only the SVG's displayed width/height and
+           the center text's font-size are independently adjusted (see
+           below), not the underlying ring proportions.
 
-           NS/P/PD derivation, unchanged math from the earlier compact
-           build: NS = S - submittedAppts.length, PD = Paid count, P =
-           submittedAppts.length - PD — guarantees NS+P+PD=S by
-           construction, not Day View's own `notSub`/`claimPend` (not
-           scoped to a.out, and claimPend excludes Denied — reusing them
-           verbatim would break the ring's required invariant).
+           NS/P/DN/RS/PD derivation: NS = S - submittedWithinSigned; PD,
+           DN, RS = the Paid / Denied / Resubmitted counts among submitted
+           claims, each capped in turn against what's left of
+           submittedWithinSigned; P = submittedWithinSigned - PD - DN - RS —
+           guarantees NS+P+DN+RS+PD=S by construction. The status
+           definitions match BillingView's ClaimDayBanner exactly (Pending =
+           blank or 'Pending'; Denied; Resubmitted; Paid), so the ring and the
+           Billing day buttons agree. (Before 2026-10-08 Denied and
+           Resubmitted were folded into Pending here.) Day View's own
+           `notSub`/`claimPend` are not used: not scoped to a.out, and
+           they'd break the ring's required invariant. The Denied and
+           Resubmitted legend rows show only when their count is above 0.
 
            NEW this pass — clamped against a real, reachable edge case,
            not just the happy path: ProviderView's own "Mark Note Signed"
@@ -19210,9 +19218,21 @@
             const submittedAppts = appts.filter(a => a.billing === 'submitted');
             const submittedWithinSigned = Math.min(submittedAppts.length, S);
             const NS = S - submittedWithinSigned;
+            // Same status definitions as BillingView's ClaimDayBanner (2026-10-08):
+            // Denied / Resubmitted / Paid are exact matches; Pending is everything
+            // else submitted — derived by subtraction below, so a blank/'Pending'
+            // status lands there (as the banner counts it) and so would any
+            // unexpected value, instead of breaking the ring.
             const rawPaid = submittedAppts.filter(a => a.claimStatus === 'Paid').length;
+            const rawDenied = submittedAppts.filter(a => a.claimStatus === 'Denied').length;
+            const rawResub = submittedAppts.filter(a => a.claimStatus === 'Resubmitted').length;
+            // Capped in turn against what's left of submittedWithinSigned, so even
+            // when the clamp above bites no count can go negative and
+            // NS + P + DN + RS + PD === S always holds.
             const PD = Math.min(rawPaid, submittedWithinSigned);
-            const P = submittedWithinSigned - PD;
+            const DN = Math.min(rawDenied, submittedWithinSigned - PD);
+            const RS = Math.min(rawResub, submittedWithinSigned - PD - DN);
+            const P = submittedWithinSigned - PD - DN - RS;
 
             const cIn = 2 * Math.PI * rIn;
             const cOut = 2 * Math.PI * rOut;
@@ -19226,6 +19246,8 @@
                 signed: `Clinical note signed (${S})`,
                 notSub: `Claim signed but not yet submitted (${NS})`,
                 pending: `Claim submitted, payment pending (${P})`,
+                denied: `Claim denied (${DN})`,
+                resub: `Claim resubmitted (${RS})`,
                 paid: `Claim submitted and paid (${PD})`,
             };
 
@@ -19283,9 +19305,21 @@
                                     <title>{tip.pending}</title>
                                 </circle>
                             )}
+                            {DN > 0 && (
+                                <circle cx={cx} cy={cy} r={rOut} fill="none" stroke="#000000" strokeWidth={swOut}
+                                    strokeDasharray={dasharray(DN / T, cOut)} strokeDashoffset={offset((U + NS + P) / T, cOut)} transform={rot}>
+                                    <title>{tip.denied}</title>
+                                </circle>
+                            )}
+                            {RS > 0 && (
+                                <circle cx={cx} cy={cy} r={rOut} fill="none" stroke="#3D768A" strokeWidth={swOut}
+                                    strokeDasharray={dasharray(RS / T, cOut)} strokeDashoffset={offset((U + NS + P + DN) / T, cOut)} transform={rot}>
+                                    <title>{tip.resub}</title>
+                                </circle>
+                            )}
                             {PD > 0 && (
                                 <circle cx={cx} cy={cy} r={rOut} fill="none" stroke="#447433" strokeWidth={swOut}
-                                    strokeDasharray={dasharray(PD / T, cOut)} strokeDashoffset={offset((U + NS + P) / T, cOut)} transform={rot}>
+                                    strokeDasharray={dasharray(PD / T, cOut)} strokeDashoffset={offset((U + NS + P + DN + RS) / T, cOut)} transform={rot}>
                                     <title>{tip.paid}</title>
                                 </circle>
                             )}
@@ -19304,6 +19338,8 @@
                         <div className="wkdr-flank">
                             <div className="wkdr-legend-item" title={tip.notSub}><span className="wkdr-dot" style={{ background: '#d83434' }} />Not Filed <b>{NS}</b></div>
                             <div className="wkdr-legend-item" title={tip.pending}><span className="wkdr-dot" style={{ background: '#fdef54' }} />Pending <b>{P}</b></div>
+                            {DN > 0 && <div className="wkdr-legend-item" title={tip.denied}><span className="wkdr-dot" style={{ background: '#000000' }} />Denied <b>{DN}</b></div>}
+                            {RS > 0 && <div className="wkdr-legend-item" title={tip.resub}><span className="wkdr-dot" style={{ background: '#3D768A' }} />Resub. <b>{RS}</b></div>}
                             <div className="wkdr-legend-item" title={tip.paid}><span className="wkdr-dot" style={{ background: '#447433' }} />Paid <b>{PD}</b></div>
                         </div>
                         <div className="wkdr-legend">
@@ -19312,6 +19348,8 @@
                             <div className="wkdr-legend-item" title={tip.signed}><span className="wkdr-dot" style={{ background: '#4E6C43' }} />Signed <b>{S}</b></div>
                             <div className="wkdr-legend-item" title={tip.notSub}><span className="wkdr-dot" style={{ background: '#d83434' }} />Not Filed <b>{NS}</b></div>
                             <div className="wkdr-legend-item" title={tip.pending}><span className="wkdr-dot" style={{ background: '#fdef54' }} />Pending <b>{P}</b></div>
+                            {DN > 0 && <div className="wkdr-legend-item" title={tip.denied}><span className="wkdr-dot" style={{ background: '#000000' }} />Denied <b>{DN}</b></div>}
+                            {RS > 0 && <div className="wkdr-legend-item" title={tip.resub}><span className="wkdr-dot" style={{ background: '#3D768A' }} />Resubmitted <b>{RS}</b></div>}
                             <div className="wkdr-legend-item" title={tip.paid}><span className="wkdr-dot" style={{ background: '#447433' }} />Paid <b>{PD}</b></div>
                         </div>
                     </div>
