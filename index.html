@@ -13001,9 +13001,13 @@
             // checklist item explicitly marked incomplete) means Issue. This was
             // the root cause of appointments that should read "In Process" instead
             // showing up as "Issue" in the Pre-visit window.
-            const explicitFail = ms.valid === false || a.intake === false || a.ins === false || a.autopay === false;
+            // Cash Pay has no insurance to verify, so its "Insurance Verified"
+            // item is neither shown nor required; its channel Valid (DirectValid)
+            // means "payment arrangement confirmed" instead.
+            const checksIns = a.method !== 'cash';
+            const explicitFail = ms.valid === false || a.intake === false || (checksIns && a.ins === false) || a.autopay === false;
             if (explicitFail) return 'issue';
-            if (ms.valid === true && a.intake === true && a.ins === true && a.autopay === true) return 'valid';
+            if (ms.valid === true && a.intake === true && (!checksIns || a.ins === true) && a.autopay === true) return 'valid';
             return 'pending';
         }
         function methCls(id, cur) {
@@ -14107,7 +14111,8 @@
             function updRequired(field, v) {
                 setD(p => {
                     const next = { ...p, [field]: v };
-                    if (next.intake === true && next.ins === true && next.autopay === true) {
+                    // Same required set as computeStatus — no insurance item for cash.
+                    if (next.intake === true && (p.method === 'cash' || next.ins === true) && next.autopay === true) {
                         const key = _msKeyOf(p.method);
                         next[key] = { ...(p[key] || { text: '', valid: null }), valid: true };
                     }
@@ -14212,14 +14217,16 @@
                                         ))}
                                     </div>
                                 </div>
-                                {d.method === 'direct' && (
+                                {sharesDirectFields(d.method) && (
                                     <>
-                                        <div className="frm">
-                                            <label className="fl">Insurance Carrier / Cost-Share Classification</label>
-                                            <input className="fi" value={d.directIns}
-                                                onChange={e => { upd('directIns', e.target.value); updMs('direct', 'text', e.target.value); }}
-                                                placeholder="e.g. Blue Cross Blue Shield, Cash Pay" />
-                                        </div>
+                                        {d.method === 'direct' && (
+                                            <div className="frm">
+                                                <label className="fl">Insurance Carrier / Cost-Share Classification</label>
+                                                <input className="fi" value={d.directIns}
+                                                    onChange={e => { upd('directIns', e.target.value); updMs('direct', 'text', e.target.value); }}
+                                                    placeholder="e.g. Blue Cross Blue Shield, Cash Pay" />
+                                            </div>
+                                        )}
                                         <div className="g2 frm">
                                             <div><label className="fl">Cost-Share Classification</label>
                                                 <select className="fi" value={d.paymentType || ''} onChange={e => upd('paymentType', e.target.value)}>
@@ -14273,7 +14280,9 @@
                                 <div style={{ background: '#FBFBF3', borderRadius: 8, padding: '8px 12px', marginBottom: 10, border: '1px solid var(--border)' }}>
                                     <div style={{ fontSize: 11, fontWeight: 800, color: '#777355', textTransform: 'uppercase', letterSpacing: .4, marginBottom: 4 }}>Required Items</div>
                                     <RadioRow label="Intake Paperwork Complete" field="intake" req onChange={v => updRequired('intake', v)} />
-                                    <RadioRow label="Insurance Verified &amp; Valid" field="ins" req onChange={v => updRequired('ins', v)} />
+                                    {d.method !== 'cash' && (
+                                        <RadioRow label="Insurance Verified &amp; Valid" field="ins" req onChange={v => updRequired('ins', v)} />
+                                    )}
                                     <RadioRow label="Autopay / Credit Card on File" field="autopay" req onChange={v => updRequired('autopay', v)} />
                                 </div>
                                 <div style={{ background: '#FBFBF3', borderRadius: 8, padding: '8px 12px', marginBottom: 10, border: '1px solid var(--border)' }}>
@@ -17324,7 +17333,7 @@
                 { label: 'Insurance Verified', val: appt.ins },
                 { label: 'Autopay on File', val: appt.autopay },
                 { label: 'CC in Tebra', val: appt.ccEhr === 'Y' ? true : appt.ccEhr === 'N' ? false : null },
-            ];
+            ].filter(c => !(appt.method === 'cash' && c.label === 'Insurance Verified'));
 
             return (
                 <div className="pim-overlay" onClick={onClose}>
@@ -18213,7 +18222,7 @@
                                                                 ['Intake Paperwork Complete', a.intake],
                                                                 ['Insurance Verified & Valid', a.ins],
                                                                 ['Autopay / Credit Card on File', a.autopay],
-                                                            ].map(([label, val]) => (
+                                                            ].filter(([label]) => !(a.method === 'cash' && label === 'Insurance Verified & Valid')).map(([label, val]) => (
                                                                 <div key={label} className={`pv-checklist-row ${val !== true ? 'pv-checklist-incomplete' : ''}`}>
                                                                     <span>{label}</span>
                                                                     <span>{val === true ? '✓' : val === false ? '✗' : '?'}</span>
@@ -19904,10 +19913,10 @@
                     // Valid: set method.valid=true AND auto-check all 3 required items,
                     // matching the behaviour of the 🟢 Valid button inside the appointment modal.
                     selected.forEach(a => {
-                        const method = a.method || 'direct';
+                        const key = methodFieldKey(a.method);   // cash shares direct's status object
                         const next = {
                             ...a,
-                            [method]: { ...(a[method] || {}), valid: true },
+                            [key]: { ...(a[key] || {}), valid: true },
                             intake: true,
                             ins: true,
                             autopay: true,
@@ -19917,8 +19926,8 @@
                 } else {
                     // Issue: set method.valid=false, leave the 3 checkboxes as-is.
                     selected.forEach(a => {
-                        const method = a.method || 'direct';
-                        const next = { ...a, [method]: { ...(a[method] || {}), valid: false } };
+                        const key = methodFieldKey(a.method);
+                        const next = { ...a, [key]: { ...(a[key] || {}), valid: false } };
                         onUpdate({ ...next, status: computeStatus(next) });
                     });
                 }
@@ -20032,9 +20041,12 @@
                                                 <td><span className="td-method-lbl" style={{ fontSize: 10, fontWeight: 800, textTransform: 'uppercase', letterSpacing: .4 }}>{METHOD_LABEL[a.method] || a.method}</span>
                                                     {ms.text && <div className={`td-method-status${ms.valid === true ? ' tm-ok' : ms.valid === false ? ' tm-err' : ' tm-pend'}`} style={{ fontSize: 11, fontWeight: 600, marginTop: 2 }}>{ms.text}</div>}
                                                 </td>
-                                                <td className={ms.valid === true ? 'cv' : ms.valid === false ? 'ce' : 'cp'}>{ms.valid === true ? '✓ Valid' : ms.valid === false ? '✗ Issue' : '⏳'}</td>
+                                                <td className={ms.valid === true ? 'cv' : ms.valid === false ? 'ce' : 'cp'}
+                                                    title={a.method === 'cash' ? 'Cash Pay: Valid = payment arrangement confirmed' : undefined}>{ms.valid === true ? '✓ Valid' : ms.valid === false ? '✗ Issue' : '⏳'}</td>
                                                 <td className={cellCls(a.intake)}>{a.intake === true ? '✓' : a.intake === false ? '✗' : '?'}</td>
-                                                <td className={cellCls(a.ins)}>{a.ins === true ? '✓' : a.ins === false ? '✗' : '?'}</td>
+                                                {a.method === 'cash'
+                                                    ? <td title="No insurance to verify for Cash Pay">—</td>
+                                                    : <td className={cellCls(a.ins)}>{a.ins === true ? '✓' : a.ins === false ? '✗' : '?'}</td>}
                                                 <td className={cellCls(a.autopay)}>{a.autopay === true ? '✓' : a.autopay === false ? '✗' : '?'}</td>
                                                 {['PHQ-9', 'GAD-7', 'PCL-5'].map(s => {
                                                     const v = a.scr?.[s];
@@ -21502,7 +21514,9 @@
                                         placeholder="e.g. Insurance updated 6/16/26 DM" />
                                 </div>
                                 <div className="frm">
-                                    <label className="fl" style={{ marginBottom: 7 }}>Validity</label>
+                                    <label className="fl" style={{ marginBottom: 7 }}>
+                                        Validity{d.method === 'cash' && <span style={{ fontWeight: 400, textTransform: 'none', marginLeft: 6 }}>— Cash Pay: Valid = payment arrangement confirmed</span>}
+                                    </label>
                                     <div className="ropt">
                                         {[[true, '🟢 Valid'], [false, '🔴 Issue'], [null, '⏳ In Process']].map(([v, l]) => (
                                             <label key={String(v)} style={{ fontSize: 14, gap: 6 }}>
@@ -21534,7 +21548,7 @@
                                         <button className="btn btn-s btn-sm" onClick={addIntakeUpdate}>+ Add</button>
                                     </div>
                                 </div>
-                                {d.method === 'direct' && (
+                                {sharesDirectFields(d.method) && (
                                     <div className="g2 frm">
                                         <div><label className="fl">Cost-Share Classification</label>
                                             <select className="fi" value={d.paymentType || ''} onChange={e => upd('paymentType', e.target.value)}>
