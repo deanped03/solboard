@@ -713,6 +713,11 @@ function saveAppointment(prov, date, apptJson) {
       hdrRange.setValues([newHdrs]);
     }
 
+    // Set by either path below when a billing-channel change could not be
+    // pushed to the patient's default — returned in the response after this
+    // row's own write has already landed (see _propagateApptChannelToPatient).
+    var channelPropagationError = '';
+
     if (targetRow > 0) {
       // ── UPDATE path ──
       // Column V (UnsignedDates) is physically maintained now (2026-08-04) —
@@ -888,12 +893,7 @@ function saveAppointment(prov, date, apptJson) {
       // updated to its new channel (correctly skips re-touching it — its
       // channel already matches the new default).
       if (channelChanged) {
-        try {
-          var newLabel = METHOD_TO_PLATFORM[newMethod] || '';
-          setPatientBillingChannel(apptData.patient, newLabel);
-        } catch (e) {
-          Logger.log('saveAppointment: billing-channel propagation failed (non-fatal): ' + e.message);
-        }
+        channelPropagationError = _propagateApptChannelToPatient(apptData.patient, newMethod, 'saveAppointment');
       }
     } else {
       // ── CREATE path ──
@@ -936,24 +936,57 @@ function saveAppointment(prov, date, apptJson) {
 
       // Runs AFTER this row's own write so setPatientBillingChannel()'s
       // internal re-scan sees this new row already in place (correctly
-      // skips re-touching it — its channel already matches). Best-effort,
-      // same as the UPDATE-path call above.
+      // skips re-touching it — its channel already matches). Same helper
+      // as the UPDATE-path call above.
       if (channelOverriddenOnCreate) {
-        try {
-          var newLabelOnCreate = METHOD_TO_PLATFORM[newMethodOnCreate] || '';
-          setPatientBillingChannel(appt.patient, newLabelOnCreate);
-        } catch (e) {
-          Logger.log('saveAppointment (CREATE): billing-channel propagation failed (non-fatal): ' + e.message);
-        }
+        channelPropagationError = _propagateApptChannelToPatient(appt.patient, newMethodOnCreate, 'saveAppointment (CREATE)');
       }
     }
 
     SpreadsheetApp.flush();
+    // The row itself saved; only the patient-default / future-appointment
+    // step didn't. rowSaved tells the caller not to treat this as a lost
+    // edit — the frontend shows its save-error indicator on any `error`.
+    if (channelPropagationError) {
+      return JSON.stringify({ error: channelPropagationError, rowSaved: true });
+    }
     return JSON.stringify({ ok: true });
   } catch (e) {
     Logger.log('saveAppointment error: ' + e.message);
     return JSON.stringify({ error: e.message });
   }
+}
+
+// ── Push one appointment's channel change to the patient's default ──────
+// Shared by saveAppointment()'s UPDATE and CREATE paths. Returns '' on
+// success, or an error message for saveAppointment() to return.
+// A non-blank method with no METHOD_TO_PLATFORM label is refused here:
+// passing '' on to setPatientBillingChannel() would be read as an
+// intentional clear, blanking the patient's default channel AND every one
+// of their future appointments. A blank method is a real clear and still
+// goes through. setPatientBillingChannel() never throws — it reports
+// failure as { ok: false, error } — so its result is checked rather than
+// relying on try/catch alone.
+function _propagateApptChannelToPatient(patientName, method, context) {
+  var label = Object.prototype.hasOwnProperty.call(METHOD_TO_PLATFORM, method)
+    ? METHOD_TO_PLATFORM[method] : '';
+  if (method && !label) {
+    var refused = 'Billing channel "' + method + '" has no Patients-tab label — patient default and future appointments were NOT updated.';
+    Logger.log(context + ': ' + refused + ' Patient: ' + patientName);
+    return refused;
+  }
+  var r;
+  try {
+    r = JSON.parse(setPatientBillingChannel(patientName, label));
+  } catch (e) {
+    r = { ok: false, error: e.message };
+  }
+  if (!r || r.ok !== true) {
+    var failed = 'Billing-channel propagation failed: ' + ((r && r.error) || 'unknown error');
+    Logger.log(context + ': ' + failed + ' Patient: ' + patientName);
+    return failed;
+  }
+  return '';
 }
 
 /** Normalize to MM/DD/YY without timezone drift. */
