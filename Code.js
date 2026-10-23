@@ -121,12 +121,12 @@ const PATIENT_COLS = [
 // them is out of scope here. This top-level copy exists so new code
 // (setPatientBillingChannel's appointment-propagation step) has one
 // shared definition to reuse instead of writing a third copy.
-const PLATFORM_TO_METHOD = { 'alma': 'alma', 'headway': 'hw', 'grow': 'grow', 'direct': 'direct' };
+const PLATFORM_TO_METHOD = { 'alma': 'alma', 'headway': 'hw', 'grow': 'grow', 'direct': 'direct', 'cash': 'cash' };
 
 // Reverse of PLATFORM_TO_METHOD — Appointments-tab short code → Patients-tab
 // billing-channel label. Used to convert a row's/appt's short-code method
 // back into the label setPatientBillingChannel() expects before calling it.
-const METHOD_TO_PLATFORM = { 'alma': 'Alma', 'hw': 'Headway', 'grow': 'Grow', 'direct': 'Direct' };
+const METHOD_TO_PLATFORM = { 'alma': 'Alma', 'hw': 'Headway', 'grow': 'Grow', 'direct': 'Direct', 'cash': 'Cash' };
 
 const STAFF_COLS = ['Email', 'Role', 'ProvID', 'DisplayName'];
 
@@ -224,7 +224,7 @@ function initializeSheets() {
     [130, 130, 90, 200, 110, 90].forEach((w, i) => patSheet.setColumnWidth(i + 1, w));
     patSheet.getRange('C2:C2000').setDataValidation(
       SpreadsheetApp.newDataValidation()
-        .requireValueInList(['Alma', 'Headway', 'Grow', 'Direct'], true)
+        .requireValueInList(['Alma', 'Headway', 'Grow', 'Direct', 'Cash'], true)
         .setAllowInvalid(false).build()
     );
     patSheet.getRange('E2:E2000').setDataValidation(
@@ -6701,7 +6701,7 @@ function cleanBadPatientStates() {
 function _buildPatientLookup(ss) {
   var lookup = {};
   var PLATFORM_TO_METHOD = {
-    'alma': 'alma', 'headway': 'hw', 'grow': 'grow', 'direct': 'direct'
+    'alma': 'alma', 'headway': 'hw', 'grow': 'grow', 'direct': 'direct', 'cash': 'cash'
   };
   var patSheet = ss.getSheetByName(TAB_PATIENT);
   if (patSheet && patSheet.getLastRow() > 1) {
@@ -7437,7 +7437,7 @@ function _getPatientBillingChannelLabel(ss, patientName) {
    Appointments() for the implementation.
 
    channel must be one of: '', 'Alma', 'Headway', 'Grow', 'Direct',
-   'Unknown'. Blank and 'Unknown' are both accepted from the UI as
+   'Cash', 'Unknown'. Blank and 'Unknown' are both accepted from the UI as
    "not yet determined" — both are normalized to '' on write, since
    PLATFORM_TO_METHOD already falls back to a blank BillingChannel
    for any value it doesn't recognize (Solrei brand rule: never default
@@ -7451,7 +7451,7 @@ function setPatientBillingChannel(patientName, channel) {
       return JSON.stringify({ ok: false, error: 'No patient sheet' });
     }
 
-    var ALLOWED = ['Alma', 'Headway', 'Grow', 'Direct'];
+    var ALLOWED = ['Alma', 'Headway', 'Grow', 'Direct', 'Cash'];
     var raw = String(channel || '').trim();
     var norm = raw.toLowerCase() === 'unknown' ? '' : raw;
     if (norm && ALLOWED.indexOf(norm) === -1) {
