@@ -5254,6 +5254,32 @@
             border-color: #7494AA
         }
 
+        /* Cash Pay — plum. Hover always goes darker than resting. Dark mode
+           uses a lighter plum (#93649A, 4.6:1 with white text) so the selected
+           button still reads against the dark surface; its hover drops back
+           to the base plum, still darker than its own resting color. */
+        .mthd-btn.on-cash {
+            background: #7A4E7E;
+            color: #FFFFFF;
+            border-color: #7A4E7E
+        }
+
+        .mthd-btn.on-cash:hover {
+            background: #5F3C63;
+            color: #FFFFFF;
+            border-color: #5F3C63
+        }
+
+        body.dark .mthd-btn.on-cash {
+            background: #93649A;
+            border-color: #93649A
+        }
+
+        body.dark .mthd-btn.on-cash:hover {
+            background: #7A4E7E;
+            border-color: #7A4E7E
+        }
+
         .rrow {
             display: flex;
             align-items: center;
@@ -10182,6 +10208,19 @@
             border-color: #7494AA
         }
 
+        /* Cash Pay — same plum and hover/dark rules as .mthd-btn.on-cash */
+        .bc-btn.on-cash {
+            background: #7A4E7E;
+            color: #FFFFFF;
+            border-color: #7A4E7E
+        }
+
+        .bc-btn.on-cash:hover {
+            background: #5F3C63;
+            color: #FFFFFF;
+            border-color: #5F3C63
+        }
+
         .bc-btn.on-unknown {
             background: #FBFBF3;
             color: var(--text-primary);
@@ -10210,6 +10249,17 @@
             background: #7A5A00;
             border-color: #7A5A00;
             color: #FBFBF3;
+        }
+
+        body.dark .bc-btn.on-cash {
+            background: #93649A;
+            border-color: #93649A;
+            color: #FFFFFF;
+        }
+
+        body.dark .bc-btn.on-cash:hover {
+            background: #7A4E7E;
+            border-color: #7A4E7E;
         }
 
         .cl-overlay {
@@ -12184,10 +12234,13 @@
             { id: 'hw', label: 'Headway' },
             { id: 'grow', label: 'Grow' },
             { id: 'direct', label: 'Clinic Submit' },
+            { id: 'cash', label: 'Cash Pay' },
         ];
-        const METHOD_LABEL = { alma: 'Alma', hw: 'Headway', grow: 'Grow', direct: 'Clinic Submit' };
-        const METHOD_COLOR = { alma: '#0C4A34', hw: '#87D1B0', grow: '#B06D12', direct: '#7494AA' };
-        const PLATFORM_MAP = { Alma: 'alma', Headway: 'hw', Grow: 'grow', Direct: 'direct' };
+        const METHOD_LABEL = { alma: 'Alma', hw: 'Headway', grow: 'Grow', direct: 'Clinic Submit', cash: 'Cash Pay' };
+        const METHOD_COLOR = { alma: '#0C4A34', hw: '#87D1B0', grow: '#B06D12', direct: '#7494AA', cash: '#7A4E7E' };
+        // Patients-tab label → appointment code. The label for Cash Pay is 'Cash'
+        // (what setPatientBillingChannel() accepts), not the on-screen "Cash Pay".
+        const PLATFORM_MAP = { Alma: 'alma', Headway: 'hw', Grow: 'grow', Direct: 'direct', Cash: 'cash' };
 
         // ── Billing-channel helpers (Cash Pay, Stage 2) ─────────────────────
         // One place that knows how each channel behaves, instead of scattered
@@ -12955,7 +13008,7 @@
         }
         function methCls(id, cur) {
             if (id !== cur) return 'mthd-btn';
-            return `mthd-btn on-${id === 'hw' ? 'hw' : id === 'grow' ? 'grow' : id === 'direct' ? 'direct' : 'alma'}`;
+            return `mthd-btn on-${id === 'hw' ? 'hw' : id === 'grow' ? 'grow' : id === 'direct' ? 'direct' : id === 'cash' ? 'cash' : 'alma'}`;
         }
         function newId() { return Math.random().toString(36).slice(2, 11); }
         function newAppt(time, patient, method, directIns, paymentType, paymentRate) {
@@ -13847,7 +13900,9 @@
             const [time, setTime] = useState('');
             const [timeErr, setTimeErr] = useState('');
             const [patient, setPatient] = useState('');
-            const [method, setMethod] = useState('alma');
+            // Blank until a patient (or a button) sets it — never default to a
+            // channel, same rule as the backend's PLATFORM_TO_METHOD fallback.
+            const [method, setMethod] = useState('');
             const [directIns, setDirectIns] = useState('');
             const [paymentType, setPaymentType] = useState('');
             const [paymentRate, setPaymentRate] = useState('');
@@ -13855,7 +13910,7 @@
 
             function handleSelect(p) {
                 setPatient(`${p.firstName} ${p.lastName}`);
-                if (p.platform) setMethod(PLATFORM_MAP[p.platform] || 'alma');
+                if (p.platform) setMethod(PLATFORM_MAP[p.platform] || '');
                 if (p.insurance) setDirectIns(p.insurance);
                 if (p.patientPortion) setPaymentType(p.patientPortion);
                 if (p.rate) setPaymentRate(p.rate);
@@ -20146,7 +20201,7 @@
         /* ════════════════════════════════════════════════════════════════
            BILLING CHANNELS PANEL — BillingChannelsPanel
            Biller-only tool for setting each patient's Platform (Alma /
-           Headway / Grow / Direct / Unknown) on the Patients tab. This is
+           Headway / Grow / Direct / Cash / Unknown) on the Patients tab. This is
            the "going forward" claim-submission channel: every Tebra Sync
            reads this value to stamp Method onto NEWLY CREATED appointment
            rows. As of 2026-08-17 it ALSO updates that patient's already-
@@ -20180,6 +20235,7 @@
                 { id: 'Headway', cls: 'on-hw' },
                 { id: 'Grow', cls: 'on-grow' },
                 { id: 'Direct', cls: 'on-direct' },
+                { id: 'Cash', cls: 'on-cash' },   // sent as 'Cash' — setPatientBillingChannel's ALLOWED is case-sensitive
                 { id: 'Unknown', cls: 'on-unknown' },
             ];
 
@@ -20198,7 +20254,7 @@
             }
 
             function channelLabel(id) {
-                return id === 'Headway' ? 'HW' : id === 'Direct' ? 'Clinic Submit' : id;
+                return id === 'Headway' ? 'HW' : id === 'Direct' ? 'Clinic Submit' : id === 'Cash' ? 'Cash Pay' : id;
             }
 
             function setPlatform(p, channelId) {
@@ -20276,9 +20332,9 @@
                                                 className={`bc-btn${curId === c.id ? ' ' + c.cls : ''}${isSavingThis ? ' saving' : ''}`}
                                                 disabled={!!rowSaving}
                                                 onClick={() => setPlatform(p, c.id)}
-                                                title={`Set billing channel to ${c.id === 'Direct' ? 'Clinic Submit' : c.id}`}
+                                                title={`Set billing channel to ${c.id === 'Direct' ? 'Clinic Submit' : c.id === 'Cash' ? 'Cash Pay' : c.id}`}
                                             >
-                                                {isSavingThis ? '…' : (c.id === 'Headway' ? 'HW' : c.id === 'Direct' ? 'Clinic Submit' : c.id)}
+                                                {isSavingThis ? '…' : channelLabel(c.id)}
                                             </button>
                                         );
                                     })}
