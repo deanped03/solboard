@@ -6279,6 +6279,11 @@ function importFromTebraApi(startDateStr, endDateStr, dryRun) {
       // Unknown/blank platform → blank Method, NOT a Headway default (Solrei brand rule).
       var method = ptInfo.method || '';
       var isDirect = method === 'direct';
+      // Cash Pay rows carry a Cost-Share Collection entry too: same Rate
+      // source as direct (Patients tab Rate column), but the class is always
+      // 'cash-pay' — that's what the channel means, regardless of whatever
+      // CostShareClass the patient record happens to hold.
+      var isCash = method === 'cash';
 
       // Prefer insurance from Tebra API; fall back to local Patients tab entry
       var directInsValue = appt.insurance || ptInfo.insurance || '';
@@ -6311,8 +6316,9 @@ function importFromTebraApi(startDateStr, endDateStr, dryRun) {
         billing: 'pending',
         status: 'pending',
         out: false,
-        paymentType: isDirect ? (ptInfo.patientPortion || '') : '',
-        paymentRate: isDirect ? (ptInfo.rate || '') : '',
+        paymentType: isDirect ? (ptInfo.patientPortion || '')
+          : (isCash ? 'cash-pay' : ''),
+        paymentRate: (isDirect || isCash) ? (ptInfo.rate || '') : '',
         paymentAmount: '',
         paymentCollected: false,
         paymentFailed: false,
