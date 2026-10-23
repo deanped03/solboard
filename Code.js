@@ -115,12 +115,11 @@ const PATIENT_COLS = [
 ];
 
 // Billing-channel label (Patients tab, e.g. "Headway") → Appointments-tab
-// short code (e.g. "hw"). Several functions already carry their own
-// function-scoped copy of this exact literal (the Tebra Excel-import
-// parser, _buildPatientLookup()) — those are left alone since touching
-// them is out of scope here. This top-level copy exists so new code
-// (setPatientBillingChannel's appointment-propagation step) has one
-// shared definition to reuse instead of writing a third copy.
+// short code (e.g. "hw"). The one shared definition: setPatientBillingChannel's
+// appointment-propagation step, saveAppointment's CREATE path, and the Tebra
+// sync's _buildPatientLookup() all read this map, so a new channel is added
+// here once. The only remaining function-scoped copy is inside the unused
+// legacy Tebra Excel-import parser (importTebraAppointments), left as-is.
 const PLATFORM_TO_METHOD = { 'alma': 'alma', 'headway': 'hw', 'grow': 'grow', 'direct': 'direct', 'cash': 'cash' };
 
 // Reverse of PLATFORM_TO_METHOD — Appointments-tab short code → Patients-tab
@@ -6700,9 +6699,6 @@ function cleanBadPatientStates() {
 
 function _buildPatientLookup(ss) {
   var lookup = {};
-  var PLATFORM_TO_METHOD = {
-    'alma': 'alma', 'headway': 'hw', 'grow': 'grow', 'direct': 'direct', 'cash': 'cash'
-  };
   var patSheet = ss.getSheetByName(TAB_PATIENT);
   if (patSheet && patSheet.getLastRow() > 1) {
     var allRows = patSheet.getDataRange().getValues();
