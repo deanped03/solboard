@@ -21508,7 +21508,9 @@
                                             <label key={String(v)} style={{ fontSize: 14, gap: 6 }}>
                                                 <input type="radio" checked={ms.valid === v} onChange={() => {
                                                     setD(p => {
-                                                        const key = _msKeyOf(p.method);
+                                                        // methodFieldKey, not _msKeyOf — that helper lives inside
+                                                        // PatientModal and isn't in scope here (ReferenceError).
+                                                        const key = methodFieldKey(p.method);
                                                         return { ...p, [key]: { ...(p[key] || { text: '', valid: null }), valid: v } };
                                                     });
                                                 }} /> {l}
