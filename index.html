@@ -12189,6 +12189,25 @@
         const METHOD_COLOR = { alma: '#0C4A34', hw: '#87D1B0', grow: '#B06D12', direct: '#7494AA' };
         const PLATFORM_MAP = { Alma: 'alma', Headway: 'hw', Grow: 'grow', Direct: 'direct' };
 
+        // ── Billing-channel helpers (Cash Pay, Stage 2) ─────────────────────
+        // One place that knows how each channel behaves, instead of scattered
+        // a.method === 'direct' checks. Clinic Submit ('direct') and Cash Pay
+        // ('cash') share DirectIns/DirectValid and the Cost Share collection
+        // fields; only Cash Pay has no claim lifecycle — it's settled by a
+        // collected Cost Share payment on a signed note, never by a claim.
+        function sharesDirectFields(m) { return m === 'direct' || m === 'cash'; }
+        function isClaimChannel(m) { return m !== 'cash'; }
+        // Which { text, valid } object holds an appointment's channel status.
+        function methodFieldKey(m) { return (m === 'alma' || m === 'hw' || m === 'grow') ? m : 'direct'; }
+        function isCashSettled(a) { return a.method === 'cash' && !!a.out && !!a.paymentCollected; }
+        function isPaidAppt(a) {
+            return a.method === 'cash' ? isCashSettled(a) : (a.billing === 'submitted' && a.claimStatus === 'Paid');
+        }
+        // Cash rows are never "submitted" or "not submitted" — even if a stale
+        // billing flag survives a switch away from a submitted claim.
+        function isClaimSubmitted(a) { return isClaimChannel(a.method) && a.billing === 'submitted'; }
+        function isClaimNotSubmitted(a) { return isClaimChannel(a.method) && a.billing !== 'submitted'; }
+
         const CPT_LIST = [
             ['99214', 'E&M Office 25min'], ['99215', 'E&M Office 40min'],
             ['90833', 'Psych +16-37min'], ['90836', 'Psych +38-52min'], ['90838', 'Psych +53+min'],
@@ -12917,10 +12936,7 @@
         }
 
         function methodStatus(appt) {
-            if (appt.method === 'alma') return appt.alma || { text: '', valid: null };
-            if (appt.method === 'hw') return appt.hw || { text: '', valid: null };
-            if (appt.method === 'grow') return appt.grow || { text: '', valid: null };
-            return appt.direct || { text: '', valid: null };
+            return appt[methodFieldKey(appt.method)] || { text: '', valid: null };
         }
         function computeStatus(a) {
             const ms = methodStatus(a);
@@ -13337,9 +13353,9 @@
             // dropped from every count. Denied dropped from this row (Stage 1);
             // BillingView dropped it too as of Stage 3 Part 2 — Denied stays
             // settable per-appointment via ClaimBadge, just not summarized here.
-            const notSub = appts.filter(a => a.method !== 'direct' && a.billing !== 'submitted').length;
-            const submittedAppts = appts.filter(a => a.billing === 'submitted');
-            const claimPaid = submittedAppts.filter(a => a.claimStatus === 'Paid').length;
+            const notSub = appts.filter(a => !sharesDirectFields(a.method) && a.billing !== 'submitted').length;
+            const submittedAppts = appts.filter(isClaimSubmitted);
+            const claimPaid = appts.filter(isPaidAppt).length;
             const claimPend = submittedAppts.filter(a => !a.claimStatus || a.claimStatus === 'Pending' || a.claimStatus === 'Resubmitted').length;
 
             return (
@@ -14031,7 +14047,7 @@
                 if (onUpdate) onUpdate({ ...d, scrData: newScrData, scr: newScr });
             }
             function _msKeyOf(method) {
-                return method === 'alma' ? 'alma' : method === 'hw' ? 'hw' : method === 'grow' ? 'grow' : 'direct';
+                return methodFieldKey(method);
             }
             function updRequired(field, v) {
                 setD(p => {
@@ -17405,7 +17421,7 @@
         ──────────────────────────────────────────────────────────────────────── */
         function ProvClaimPill({ a }) {
             const [open, setOpen] = React.useState(false);
-            const isSubmitted = a.billing === 'submitted';
+            const isSubmitted = isClaimSubmitted(a);
             const clSt = isSubmitted ? (a.claimStatus || 'Pending') : null;
 
             const CFG = {
@@ -17910,9 +17926,9 @@
                 if (!postFilter) return true;
                 if (postFilter === 'notSigned') return !a.out;
                 if (postFilter === 'signed') return !!a.out;
-                if (postFilter === 'notSub') return a.method !== 'direct' && a.billing !== 'submitted';
-                if (postFilter === 'claimPend') return a.billing === 'submitted' && (!a.claimStatus || a.claimStatus === 'Pending' || a.claimStatus === 'Resubmitted');
-                if (postFilter === 'paid') return a.billing === 'submitted' && a.claimStatus === 'Paid';
+                if (postFilter === 'notSub') return !sharesDirectFields(a.method) && a.billing !== 'submitted';
+                if (postFilter === 'claimPend') return isClaimSubmitted(a) && (!a.claimStatus || a.claimStatus === 'Pending' || a.claimStatus === 'Resubmitted');
+                if (postFilter === 'paid') return isPaidAppt(a);
                 return true;
             }
             // Only actually narrows the list in Post-visit mode — Pre-visit mode's
@@ -17980,7 +17996,7 @@
                             // row's own date (= current Provider-Day `date`). Sheet untouched.
                             const displayUnsigned = filterDisplayUnsigned(a.unsigned, date);
                             const hasU = displayUnsigned.length > 0;
-                            const showPay = a.method === 'direct';
+                            const showPay = sharesDirectFields(a.method);
                             const pBadge = a.paymentCollected ? 'coll' : a.paymentFailed ? 'fail' : 'pend';
                             const pTxt = a.paymentCollected ? '✓ Collected' : a.paymentFailed ? '✗ Failed' : '$ Pending';
                             const copayColor = showPay
@@ -18002,9 +18018,9 @@
                             // instead of noteStatus. Applied alongside postBorderCls, not
                             // instead of it — see .pv-post-ring in <style> for how both
                             // sides' rings render together without one clobbering the other.
-                            const postClaimBorderCls = a.billing !== 'submitted' ? 'pv-post-not-submitted'
-                                : a.claimStatus === 'Paid' ? 'pv-post-paid'
-                                    : 'pv-post-pending';
+                            const postClaimBorderCls = isPaidAppt(a) ? 'pv-post-paid'
+                                : isClaimSubmitted(a) ? 'pv-post-pending'
+                                    : 'pv-post-not-submitted';
                             // Background — single combined derivation (Stage 2, Part 1), one
                             // class only, in priority order: Not Signed (red) beats
                             // everything, since an unsigned note needs attention regardless
@@ -18014,10 +18030,10 @@
                             // silent-override .pv-post-ready/.pv-post-signed used to hit —
                             // see the CSS comment above .pv-post-bg-baseline).
                             const postBgCls = !a.out ? 'pv-post-bg-notsigned'
-                                : a.billing === 'submitted' && a.claimStatus === 'Paid' ? 'pv-post-bg-paid'
-                                    : a.billing === 'submitted' ? 'pv-post-bg-pending'
+                                : isPaidAppt(a) ? 'pv-post-bg-paid'
+                                    : isClaimSubmitted(a) ? 'pv-post-bg-pending'
                                         : 'pv-post-bg-baseline';
-                            const postDirectCls = a.method === 'direct' ? 'pv-post-direct' : '';
+                            const postDirectCls = sharesDirectFields(a.method) ? 'pv-post-direct' : '';
                             // Screener score badges — shared by both Pre-visit and Post-visit detail panels
                             const screenerChips = (() => {
                                 const sd = a.scrData || {};
@@ -18170,7 +18186,7 @@
                                                     )}
                                                     {ms.text && <div className={`pv-stxt ${ms.valid === true ? 'ok' : ms.valid === false ? 'err' : 'pend'}`}>{ms.text}</div>}
                                                     {showPay && <div className={`pay-badge ${pBadge}`}>{pTxt}</div>}
-                                                    {a.method !== 'direct' && <ProvClaimPill a={a} />}
+                                                    {!sharesDirectFields(a.method) && <ProvClaimPill a={a} />}
                                                     <div style={{ display: 'flex', alignItems: 'center', marginTop: 6 }}>
                                                         <CommChatIcon appt={a} onOpen={() => setPamModal(a)} className="pv-comm-icon-lg" />
                                                     </div>
@@ -18334,7 +18350,7 @@
                                                             ))}
                                                         </div>
                                                     )}
-                                                    {a.method !== 'direct' && <ProvClaimPill a={a} />}
+                                                    {!sharesDirectFields(a.method) && <ProvClaimPill a={a} />}
                                                     <div style={{ display: 'flex', alignItems: 'center', marginTop: 6 }}>
                                                         <CommChatIcon appt={a} onOpen={() => setPamModal(a)} className="pv-comm-icon-lg" />
                                                     </div>
@@ -21335,7 +21351,7 @@
             function upd(field, val) { setD(p => ({ ...p, [field]: val })); }
             const updMs = makeUpdMs(setD);
 
-            const msKey = d.method === 'alma' ? 'alma' : d.method === 'hw' ? 'hw' : d.method === 'grow' ? 'grow' : 'direct';
+            const msKey = methodFieldKey(d.method);
             const ms = d[msKey] || { text: '', valid: null };
 
             // Warns only when Insurance Carrier actually changed from the
@@ -21953,8 +21969,8 @@
             // ── Unfiltered totals — ClaimDayBanner always counts off these, so every
             // stat (and therefore every filter button) stays visible/clickable no
             // matter which filter is currently narrowing the sections below. ──
-            const totalSubmtd = activeAppts.filter(a => a.billing === 'submitted');
-            const totalNotSubmitted = activeAppts.filter(a => a.billing !== 'submitted');
+            const totalSubmtd = activeAppts.filter(isClaimSubmitted);
+            const totalNotSubmitted = activeAppts.filter(isClaimNotSubmitted);
             // ── Filtered data feeding the three row sections below — predicate-
             // function form (not a nested ternary chain) so it structurally
             // matches ProviderView's matchesPostFilter, which this mirrors.
@@ -21966,11 +21982,12 @@
             // the same definitions, so what you see is what you filter to. ──
             function matchesClaimFilter(a) {
                 if (!claimFilter) return true;
-                if (claimFilter === 'notSubmitted') return a.billing !== 'submitted';
-                if (claimFilter === 'submitted') return a.billing === 'submitted';
+                if (claimFilter === 'notSubmitted') return isClaimNotSubmitted(a);
+                if (claimFilter === 'submitted') return isClaimSubmitted(a);
                 if (claimFilter === 'notSigned') return !a.out;
                 if (claimFilter === 'signed') return !!a.out;
-                return a.billing === 'submitted' && (a.claimStatus || 'Pending') === claimFilter;
+                if (claimFilter === 'Paid') return isPaidAppt(a);
+                return isClaimSubmitted(a) && (a.claimStatus || 'Pending') === claimFilter;
             }
             const filteredAppts = activeAppts.filter(matchesClaimFilter);
             // Auto-clear a stale filter (2026-10-07) — if the active filter no
@@ -22396,7 +22413,7 @@
                         <div className="bsec-title">✅ Signed &amp; Ready to Bill ({signedReady.length})</div>
                         {signedReady.map(a => <BRow key={a.id} a={a}
                             onOpen={setBillerModal}
-                            action={a.method !== 'direct'
+                            action={!sharesDirectFields(a.method)
                                 ? <button className="sub-btn ready" onClick={e => {
                                     e.stopPropagation();
                                     // Always today (2026-10-08), not the old date: this button
@@ -22428,7 +22445,7 @@
                         <div className="bsec-title">🔵 Submitted ({submtd.length})</div>
                         {submtd.map(a => <BRow key={a.id} a={a}
                             onOpen={setBillerModal}
-                            action={a.method !== 'direct'
+                            action={!sharesDirectFields(a.method)
                                 ? <button className="sub-btn done">✓ Submitted</button>
                                 : null} />)}
                     </div>}
