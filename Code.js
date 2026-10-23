@@ -755,12 +755,14 @@ function saveAppointment(prov, date, apptJson) {
       // is skipped entirely and whatever the client sent is kept as-is; a
       // manual edit must never get silently overwritten by this same stamp
       // on the very next unrelated save.
-      // Priority when not manually set: Patient DB > existing appointment value > directIns (direct only).
+      // Priority when not manually set: Patient DB > existing appointment value >
+      // directIns (direct and cash only — the two channels that share DirectIns).
       var patInfo = _lookupPatient(ss, apptData.patient);
       if (!wasInsuranceCarrierManuallySet) {
         apptData.insuranceCarrier = patInfo.insurance
           || apptData.insuranceCarrier
-          || (apptData.method === 'direct' ? apptData.directIns : '')
+          || ((apptData.method === 'direct' || apptData.method === 'cash')
+            ? apptData.directIns : '')
           || '';
       }
       apptData.patientState = patInfo.patientState || apptData.patientState || '';
@@ -908,7 +910,7 @@ function saveAppointment(prov, date, apptJson) {
       // ── Stamp InsuranceCarrier + PatientState from Patient DB ────────────
       var patInfoNew = _lookupPatient(ss, appt.patient);
       appt.insuranceCarrier = patInfoNew.insurance
-        || (appt.method === 'direct' ? appt.directIns : '')
+        || ((appt.method === 'direct' || appt.method === 'cash') ? appt.directIns : '')
         || '';
       appt.patientState = patInfoNew.patientState || '';
 
