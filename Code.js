@@ -790,7 +790,10 @@ function saveAppointment(prov, date, apptJson) {
         } else if (oldMethod === 'grow') {
           rowData[APPT_COLS.indexOf('GrowText')] = '';
           rowData[APPT_COLS.indexOf('GrowValid')] = '';
-        } else if (oldMethod === 'direct') {
+        } else if (oldMethod === 'direct' || oldMethod === 'cash') {
+          // direct and cash share the DirectValid column but it means
+          // different things (insurance verified vs. payment arrangement
+          // confirmed), so it clears on any change — direct ↔ cash included.
           rowData[APPT_COLS.indexOf('DirectValid')] = '';
           // DirectIns is the patient's insurance carrier name, not a
           // verification note — never clear it here.
@@ -7425,12 +7428,16 @@ function _getPatientBillingChannelLabel(ss, patientName) {
    short code, the channel is updated and that row's OLD channel's
    verification fields are cleared: AlmaText/AlmaValid (from 'alma'),
    HWText/HWValid (from 'hw'), GrowText/GrowValid (from 'grow'), or
-   DirectValid only (from 'direct' — DirectIns holds the patient's
-   insurance carrier name, not a verification note, and is always
-   preserved). Rows already on the new channel, and past/cancelled
-   rows, are left untouched. Intake/InsVerified/Autopay are never
-   touched by this propagation. See _propagateBillingChannelToFuture
-   Appointments() for the implementation.
+   DirectValid only (from 'direct' or 'cash' — DirectIns holds the
+   patient's insurance carrier name, not a verification note, and is
+   always preserved). Clinic Submit and Cash share the DirectValid
+   column but Valid means insurance verified for one and payment
+   arrangement confirmed for the other, so it clears on direct ↔ cash
+   too. Cost Share fields are never cleared. Rows already on the new
+   channel, and past/cancelled rows, are left untouched.
+   Intake/InsVerified/Autopay are never touched by this propagation.
+   See _propagateBillingChannelToFutureAppointments() for the
+   implementation.
 
    channel must be one of: '', 'Alma', 'Headway', 'Grow', 'Direct',
    'Cash', 'Unknown'. Blank and 'Unknown' are both accepted from the UI as
@@ -7506,10 +7513,14 @@ function setPatientBillingChannel(patientName, channel) {
    BillingChannel differs from newShortCode, stamps the new channel
    and clears that row's OLD channel's verification fields —
    AlmaText/AlmaValid, HWText/HWValid, GrowText/GrowValid, or
-   DirectValid only (DirectIns is insurance data, not a verification
-   note, and is always preserved). Rows already on the new channel are
-   skipped untouched. Batch read + single batch write — no per-row
-   setValue() calls, mirroring the Tebra sync's write pattern.
+   DirectValid only, when leaving 'direct' or 'cash' — including
+   direct ↔ cash, since that shared column means insurance verified
+   for one and payment arrangement confirmed for the other. DirectIns
+   is insurance data, not a verification note, and is always
+   preserved; Cost Share fields are never touched. Rows already on the
+   new channel are skipped untouched. Batch read + single batch
+   write — no per-row setValue() calls, mirroring the Tebra sync's
+   write pattern.
 
    Returns { count, dates } — count of rows changed and their (already
    _fmtDate-formatted) dates, for the caller's audit-log summary.
@@ -7564,7 +7575,10 @@ function _propagateBillingChannelToFutureAppointments(ss, patientName, newShortC
     } else if (currentChan === 'grow') {
       row[IDX_GROW_TEXT] = '';
       row[IDX_GROW_VALID] = '';
-    } else if (currentChan === 'direct') {
+    } else if (currentChan === 'direct' || currentChan === 'cash') {
+      // Shared DirectValid column, different meaning per channel (insurance
+      // verified vs. payment arrangement confirmed) — clears on any change,
+      // direct ↔ cash included.
       row[IDX_DIRECT_VALID] = '';
     }
 
