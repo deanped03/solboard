@@ -12260,6 +12260,10 @@
         // billing flag survives a switch away from a submitted claim.
         function isClaimSubmitted(a) { return isClaimChannel(a.method) && a.billing === 'submitted'; }
         function isClaimNotSubmitted(a) { return isClaimChannel(a.method) && a.billing !== 'submitted'; }
+        // A $0 Clinic Submit copay needs no collection and is confirmed
+        // automatically. A $0 Cash Pay visit is NOT — it still needs Collected
+        // checked before it counts as paid.
+        function isAutoConfirmedZero(method, rate) { return method === 'direct' && isZeroRate(rate); }
 
         const CPT_LIST = [
             ['99214', 'E&M Office 25min'], ['99215', 'E&M Office 40min'],
@@ -18861,16 +18865,18 @@
 
         /* ── Shared Direct Pay banner data builder ────────────────────────────
            Used by both WeekView (provider) and AllProviderWeekView (billing/assistant).
-           $0-rate patients are auto-placed in the right (collected) column as $0/$0.
+           Covers Clinic Submit and Cash Pay rows (both collect through Cost Share).
+           $0-rate Clinic Submit patients are auto-placed in the right (collected)
+           column as $0/$0; $0 Cash Pay rows still wait for Collected like any other.
            Returns null only when there are zero direct-pay appointments at all.
         ──────────────────────────────────────────────────────────────────────── */
         function dpSummary(dAppts) {
             // Exclude void appointments (No-show / Rescheduled / Cancelled) from all
             // direct-pay summaries so they never inflate "needs collection" counts.
-            const allDirect = dAppts.filter(a => a.method === 'direct' && !isVoidAppt(a));
+            const allDirect = dAppts.filter(a => sharesDirectFields(a.method) && !isVoidAppt(a));
             if (!allDirect.length) return null;
-            const zeroPts = allDirect.filter(a => isZeroRate(a.paymentRate));
-            const collectPts = allDirect.filter(a => !isZeroRate(a.paymentRate));
+            const zeroPts = allDirect.filter(a => isAutoConfirmedZero(a.method, a.paymentRate));
+            const collectPts = allDirect.filter(a => !isAutoConfirmedZero(a.method, a.paymentRate));
             const realCollected = collectPts.filter(a => a.paymentCollected);
             const failedPts = collectPts.filter(a => a.paymentFailed && !a.paymentCollected);
             const pendingPts = collectPts.filter(a => !a.paymentCollected && !a.paymentFailed);
@@ -21126,7 +21132,7 @@
         }
 
         function DirectPaySection({ appts, date, onUpdate, patientDb }) {
-            const pts = [...appts].filter(a => a.method === 'direct').sort((a, b) => timeToMinutes(a.time) - timeToMinutes(b.time));
+            const pts = [...appts].filter(a => sharesDirectFields(a.method)).sort((a, b) => timeToMinutes(a.time) - timeToMinutes(b.time));
             const healedRef = useRef(new Set());
             // Collapsed by default — same pattern as the Provider Day view's
             // DayDirectPayBanner (pvdp-collapsible / pvdp-summary-toggle), so Cost
@@ -21177,17 +21183,18 @@
 
             if (!pts.length) return null;
 
-            // Split: $0 copay patients (confirmed, no collection) vs. those needing collection
+            // Split: $0 Clinic Submit copays (confirmed, no collection) vs. those
+            // needing collection — every Cash Pay row, $0 included, stays here.
             const ptsInfo = pts.map(a => ({ a, info: ptInfo(a) }));
-            const collectionPts = ptsInfo.filter(({ info }) => !isZeroRate(info.paymentRate));
-            const zeroPts = ptsInfo.filter(({ info }) => isZeroRate(info.paymentRate));
+            const collectionPts = ptsInfo.filter(({ a, info }) => !isAutoConfirmedZero(a.method, info.paymentRate));
+            const zeroPts = ptsInfo.filter(({ a, info }) => isAutoConfirmedZero(a.method, info.paymentRate));
 
             function sendAlert() {
                 const lines = collectionPts.map(({ a, info }) => {
                     const st = a.paymentCollected ? '✅ COLLECTED' : a.paymentFailed ? '❌ FAILED' : '⏳ PENDING';
                     const rate = info.paymentRate ? ` | Rate: ${info.paymentRate}` : '';
                     const amt = a.paymentAmount ? ` | Collect: $${a.paymentAmount}` : '';
-                    return `• ${a.patient} (${fmtTime(a.time)}) | ${info.insurance || 'Clinic Submit'} | ${info.paymentType || '—'}${rate}${amt} | ${st}`;
+                    return `• ${a.patient} (${fmtTime(a.time)}) | ${info.insurance || METHOD_LABEL[a.method]} | ${info.paymentType || '—'}${rate}${amt} | ${st}`;
                 }).join('\n');
                 const sub = encodeURIComponent(`Cost-Share Collection Alert — ${fmtDate(date)}`);
                 const body = encodeURIComponent(`Cost-Share Collection Report\n${fmtDate(date)}\n${'─'.repeat(48)}\n\n${lines}\n\n${'─'.repeat(48)}\nFrom: SolBoard — Solrei Behavioral Health`);
