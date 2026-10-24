@@ -3502,6 +3502,32 @@
             cursor: default;
         }
 
+        /* ── Cash due (Cash Pay, Stage 2) — plum. Unlike the rest of this
+       family, hover goes darker instead of the .7 opacity dim (Cash Pay
+       color rule: hover always darker than resting). --pv-stat-bg has no
+       dark-mode override, so the chip stays light and the same plum keeps
+       its 6.3:1 contrast in both themes. ── */
+        .pv-stat-plum {
+            color: #7A4E7E;
+            border-color: #7A4E7E;
+        }
+
+        .pv-stat-plum:hover {
+            opacity: 1;
+            color: #5F3C63;
+            border-color: #5F3C63;
+        }
+
+        .pv-stat-plum.pv-stat-active {
+            background: #7A4E7E;
+            color: #FFFFFF;
+        }
+
+        .pv-stat-plum.pv-stat-active:hover {
+            background: #5F3C63;
+            color: #FFFFFF;
+        }
+
         /* ── Per-appointment claim status badge (Billing day view) ─────────── */
         .csb-wrap {
             display: flex;
@@ -12260,6 +12286,8 @@
         // billing flag survives a switch away from a submitted claim.
         function isClaimSubmitted(a) { return isClaimChannel(a.method) && a.billing === 'submitted'; }
         function isClaimNotSubmitted(a) { return isClaimChannel(a.method) && a.billing !== 'submitted'; }
+        // Signed Cash Pay visit whose Cost Share payment isn't marked Collected yet.
+        function isCashDue(a) { return a.method === 'cash' && !!a.out && !a.paymentCollected; }
         // A $0 Clinic Submit copay needs no collection and is confirmed
         // automatically. A $0 Cash Pay visit is NOT — it still needs Collected
         // checked before it counts as paid.
@@ -22066,6 +22094,7 @@
                 if (claimFilter === 'notSigned') return !a.out;
                 if (claimFilter === 'signed') return !!a.out;
                 if (claimFilter === 'Paid') return isPaidAppt(a);
+                if (claimFilter === 'cashDue') return isCashDue(a);
                 return isClaimSubmitted(a) && (a.claimStatus || 'Pending') === claimFilter;
             }
             const filteredAppts = activeAppts.filter(matchesClaimFilter);
@@ -22079,10 +22108,14 @@
             React.useLayoutEffect(() => {
                 if (claimFilter && filteredAppts.length === 0) setClaimFilter(null);
             }, [claimFilter, filteredAppts.length]);
-            const submtd = filteredAppts.filter(a => a.billing === 'submitted');
-            const notSubmitted = filteredAppts.filter(a => a.billing !== 'submitted');
+            const submtd = filteredAppts.filter(isClaimSubmitted);
+            const notSubmitted = filteredAppts.filter(isClaimNotSubmitted);
             const signedReady = notSubmitted.filter(a => a.out);   // signed → Submit Claim available (CPT optional)
-            const needsSig = notSubmitted.filter(a => !a.out);  // not signed → cannot submit yet
+            // Not signed → nothing to bill yet. Includes unsigned Cash Pay rows,
+            // which have no claim but still wait on the signature to settle.
+            const needsSig = filteredAppts.filter(a => !a.out && !isClaimSubmitted(a));
+            // Signed Cash Pay rows — their own section; green once Collected.
+            const cashSigned = filteredAppts.filter(a => a.method === 'cash' && a.out);
             function saveCpt(appt, codes) {
                 // Same submitted-claim guard as ClaimSubmitModal (2026-08-19).
                 const billing = appt.billing === 'submitted'
@@ -22138,6 +22171,7 @@
                 // only unsubmitted rows were Direct-Pay (and let the filter strand an empty list
                 // after the last insurance row was submitted). That exclusion was dropped on
                 // 2026-10-08. DirectPaySection itself is unchanged.
+                // Cash Pay rows never count here — they have no claim (see Cash due).
                 // Reads the unfiltered totals (not submtd/notSubmitted) so every stat
                 // stays visible and clickable regardless of which filter is active.
                 const notSub = totalNotSubmitted.length;
@@ -22154,10 +22188,15 @@
                 const pend = totalSubmtd.filter(a => !a.claimStatus || a.claimStatus === 'Pending').length;
                 const denied = totalSubmtd.filter(a => a.claimStatus === 'Denied').length;
                 const resub = totalSubmtd.filter(a => a.claimStatus === 'Resubmitted').length;
-                const paid = totalSubmtd.filter(a => a.claimStatus === 'Paid').length;
+                // Paid includes settled Cash Pay (signed + Collected), and Paid $ adds
+                // what was collected for them; Cash due counts signed, uncollected cash.
+                const paidAppts = activeAppts.filter(isPaidAppt);
+                const paid = paidAppts.length;
+                const cashDue = activeAppts.filter(isCashDue).length;
                 // Same Paid-only rule as the Claims Ledger total (2026-10-08): stale amounts on
                 // non-Paid claims are not summed.
-                const paidAmt = totalSubmtd.filter(a => a.claimStatus === 'Paid').reduce((s, a) => s + (parseFloat(a.claimPaidAmount) || 0), 0);
+                const paidAmt = paidAppts.reduce((s, a) =>
+                    s + (parseFloat(a.method === 'cash' ? a.paymentAmount : a.claimPaidAmount) || 0), 0);
                 // Not Signed / Signed replace the old standalone "Unsigned Notes" stat
                 // with the same Not Signed/Signed pair ProviderView's SummaryBar uses —
                 // signedCount is exactly the old unsignedCount's complement, same field.
@@ -22209,9 +22248,15 @@
                                 🔄 {resub} Resubmitted
                             </span>
                         )}
+                        {cashDue > 0 && (
+                            <span className={`pv-stat pv-stat-plum${claimFilter === 'cashDue' ? ' pv-stat-active' : ''}`}
+                                onClick={() => toggleClaimFilter('cashDue')} title="Filter to signed Cash Pay visits not yet collected">
+                                💵 {cashDue} Cash due
+                            </span>
+                        )}
                         {paid > 0 && (
                             <span className={`pv-stat pv-stat-green${claimFilter === 'Paid' ? ' pv-stat-active' : ''}`}
-                                onClick={() => toggleClaimFilter('Paid')} title="Filter to paid claims">
+                                onClick={() => toggleClaimFilter('Paid')} title="Filter to paid claims and collected Cash Pay visits">
                                 ✅ {paid} Paid
                                 {/* Large aggregate $ total — desktop only (hidden on phone via
                     .cds-paid-amt, see mobile media query). The small per-row
@@ -22229,8 +22274,10 @@
             }
             function BRow({ a, action, onOpen }) {
                 const ms = methodStatus(a);
-                const isDirect = a.method === 'direct';
-                const isSubmitted = a.billing === 'submitted';
+                // Clinic Submit or Cash Pay — the card opens the claim modal.
+                const isDirect = sharesDirectFields(a.method);
+                const isCash = a.method === 'cash';
+                const isSubmitted = isClaimSubmitted(a);
                 const info = getPatientInfo(a);
                 const [statusMenuOpen, setStatusMenuOpen] = React.useState(false);
                 const CS_CLS = { Paid: 'csb-paid', Pending: 'csb-pend', Denied: 'csb-denied', Resubmitted: 'csb-resub' };
@@ -22254,7 +22301,8 @@
                 // Derived from the buffered st (not a.claimStatus directly) so the
                 // card color holds steady in agreement with ClaimBadge while the
                 // Paid-amount input is focused.
-                const isPaid = isSubmitted && st === 'Paid';
+                // Cash Pay has no claim: paid = note signed + Cost Share Collected.
+                const isPaid = isCash ? isCashSettled(a) : (isSubmitted && st === 'Paid');
                 // Note-status left border (Stage 4, Part 2) — reused directly from
                 // ProviderView's own postBorderCls derivation (same field, same
                 // fallback order), not reinvented. .pv-post-ring renders it (plus a
@@ -22273,9 +22321,9 @@
                 // disagree for that same window. --pv-ring-right, unset until
                 // now, is picked up automatically by .pv-post-ring's existing
                 // box-shadow — no changes needed there.
-                const postClaimBorderCls = isSubmitted
-                    ? (isPaid ? 'pv-post-paid' : 'pv-post-pending')
-                    : 'pv-post-not-submitted';
+                const postClaimBorderCls = isPaid ? 'pv-post-paid'
+                    : isSubmitted ? 'pv-post-pending'
+                        : 'pv-post-not-submitted';
 
                 function ClaimBadge() {
                     if (!isSubmitted) return null;
@@ -22343,7 +22391,7 @@
                 return (
                     <>
                         <div
-                            className={`b-card${isDirect ? ' b-card-direct' : ''}${!a.out ? ' b-card-baseline' : (isSubmitted ? (isPaid ? ' b-card-paid' : ' b-card-pending') : ' b-card-unsubmitted')} ${postBorderCls} ${postClaimBorderCls} pv-post-ring`}
+                            className={`b-card${isDirect ? ' b-card-direct' : ''}${!a.out ? ' b-card-baseline' : (isPaid ? ' b-card-paid' : isSubmitted ? ' b-card-pending' : ' b-card-unsubmitted')} ${postBorderCls} ${postClaimBorderCls} pv-post-ring`}
                             style={{ cursor: (isDirect || onOpen) ? 'pointer' : 'default' }}
                             onClick={isDirect ? () => setClaimModal(a) : (onOpen ? () => onOpen(a) : undefined)}>
                             <div style={{ minWidth: 150 }}>
@@ -22375,7 +22423,7 @@
                                         </div>
                                     );
                                 })()}
-                                {isDirect && isZeroRate(info.rate)
+                                {isAutoConfirmedZero(a.method, info.rate)
                                     ? <div className="b-zero-copay-badge">💚 $0 Copay</div>
                                     : (info.portion || info.rate) && (
                                         <div style={{ fontSize: 12, color: isSubmitted ? (isPaid ? 'var(--success)' : '#EAF1F1') : '#777355', marginTop: 2 }}>
@@ -22433,6 +22481,17 @@
                                     return (
                                         <div style={{ background: '#FBFBF3', border: `1px solid ${stStyle.bd}`, color: stStyle.fg, borderRadius: 0, padding: '6px 18px', fontSize: 15, fontWeight: 900, textAlign: 'center' }}>
                                             {stIcon} {st}{paidAmt}
+                                        </div>
+                                    );
+                                })()}
+                                {/* Cash Pay — payment status in place of a claim status */}
+                                {isCash && (() => {
+                                    const coll = !!a.paymentCollected;
+                                    const amt = parseFloat(a.paymentAmount);
+                                    const amtTxt = coll && !isNaN(amt) ? ` · $${amt.toFixed(2)}` : '';
+                                    return (
+                                        <div style={{ background: '#FBFBF3', border: `1px solid ${coll ? 'var(--success)' : '#7A4E7E'}`, color: coll ? 'var(--success)' : '#7A4E7E', borderRadius: 0, padding: '6px 18px', fontSize: 15, fontWeight: 900, textAlign: 'center' }}>
+                                            {coll ? `✅ Collected${amtTxt}` : '💵 Payment due'}
                                         </div>
                                     );
                                 })()}
@@ -22514,6 +22573,10 @@
                                     });
                                 }}>Mark Claim Submitted</button>
                                 : null} />)}
+                    </div>}
+                    {cashSigned.length > 0 && <div className="bsec">
+                        <div className="bsec-title">💵 Cash Pay ({cashSigned.length})</div>
+                        {cashSigned.map(a => <BRow key={a.id} a={a} onOpen={setBillerModal} action={null} />)}
                     </div>}
                     {needsSig.length > 0 && <div className="bsec">
                         <div className="bsec-title">⚠ Awaiting Provider Signature ({needsSig.length})</div>
