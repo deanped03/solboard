@@ -20550,6 +20550,26 @@
                 };
             }
 
+            // Immediate (no-Save) payment writes from the payment row below.
+            // Sends ONLY the Cost Share payment fields, layered on the
+            // appointment as it was when this modal opened — every other draft
+            // edit (channel, CPT, Rx, insurance, claim fields) waits for Save
+            // Changes, so a channel switch can't be saved here without its
+            // warning. localAppt already holds earlier payment edits from this
+            // session; `fields` carries the one(s) just changed.
+            function savePaymentFields(fields) {
+                if (!onPaymentSave) return;
+                onPaymentSave({
+                    ...appt,
+                    paymentAmount: localAppt.paymentAmount,
+                    paymentCollected: localAppt.paymentCollected,
+                    paymentFailed: localAppt.paymentFailed,
+                    paymentDate: localAppt.paymentDate,
+                    paymentPlatform: localAppt.paymentPlatform,
+                    ...fields,
+                });
+            }
+
             const hasCpt = normCpt(localAppt.cpt).length > 0;
             const isSigned = !!localAppt.out;
             // Cash Pay mode follows the draft channel: no claim to file, so the
@@ -20906,7 +20926,7 @@
                                                 onChange={e => {
                                                     const v = e.target.value;
                                                     setLocalAppt({ ...localAppt, paymentAmount: v });
-                                                    if (onPaymentSave) onPaymentSave(buildFinalAppt({ paymentAmount: v }));
+                                                    savePaymentFields({ paymentAmount: v });
                                                 }} />
                                         </div>
                                         <div className="csm-chks">
@@ -20923,11 +20943,11 @@
                                                                 : (!checked && !localAppt.paymentFailed ? '' : localAppt.paymentDate),
                                                         };
                                                         setLocalAppt(newLocal);
-                                                        if (onPaymentSave) onPaymentSave(buildFinalAppt({
+                                                        savePaymentFields({
                                                             paymentCollected: newLocal.paymentCollected,
                                                             paymentFailed: newLocal.paymentFailed,
                                                             paymentDate: newLocal.paymentDate,
-                                                        }));
+                                                        });
                                                     }} />
                                                 Collected
                                             </label>
@@ -20944,11 +20964,11 @@
                                                                 : (!checked && !localAppt.paymentCollected ? '' : localAppt.paymentDate),
                                                         };
                                                         setLocalAppt(newLocal);
-                                                        if (onPaymentSave) onPaymentSave(buildFinalAppt({
+                                                        savePaymentFields({
                                                             paymentCollected: newLocal.paymentCollected,
                                                             paymentFailed: newLocal.paymentFailed,
                                                             paymentDate: newLocal.paymentDate,
-                                                        }));
+                                                        });
                                                     }} />
                                                 Failed
                                             </label>
@@ -20968,7 +20988,7 @@
                                                             const v = e.target.value;
                                                             const newPlatform = v === 'Other' ? 'other' : v;
                                                             setLocalAppt({ ...localAppt, paymentPlatform: newPlatform });
-                                                            if (onPaymentSave) onPaymentSave(buildFinalAppt({ paymentPlatform: newPlatform }));
+                                                            savePaymentFields({ paymentPlatform: newPlatform });
                                                         }}>
                                                         <option value="">—</option>
                                                         {PAYMENT_PLATFORMS.map(p => <option key={p} value={p}>{p}</option>)}
@@ -20980,7 +21000,7 @@
                                                             onChange={e => {
                                                                 const newPlatform = e.target.value || 'other';
                                                                 setLocalAppt({ ...localAppt, paymentPlatform: newPlatform });
-                                                                if (onPaymentSave) onPaymentSave(buildFinalAppt({ paymentPlatform: newPlatform }));
+                                                                savePaymentFields({ paymentPlatform: newPlatform });
                                                             }} />
                                                     )}
                                                 </div>
@@ -20996,7 +21016,7 @@
                                                     onChange={e => {
                                                         const newDate = e.target.value;
                                                         setLocalAppt({ ...localAppt, paymentDate: newDate });
-                                                        if (onPaymentSave) onPaymentSave(buildFinalAppt({ paymentDate: newDate }));
+                                                        savePaymentFields({ paymentDate: newDate });
                                                     }} />
                                             </div>
                                         )}
