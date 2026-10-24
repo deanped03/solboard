@@ -17646,6 +17646,34 @@
             );
         }
 
+        // ── Channel-switch-off-a-collected-Cash-Pay-visit warning — same
+        // pattern as ClaimChannelSwitchWarningDialog above. The Cost Share
+        // fields are never cleared by a channel change, so this is about the
+        // visit no longer counting as a paid Cash Pay visit, not lost data.
+        function CashChannelSwitchWarningDialog({ onConfirm, onCancel }) {
+            return (
+                <div className="overlay" onClick={onCancel} style={{ zIndex: 10000 }}>
+                    <div className="modal sm" onClick={e => e.stopPropagation()}>
+                        <div className="m-hdr">
+                            <div className="m-title">Confirm Billing Channel Change</div>
+                            <button className="m-close" onClick={onCancel}>×</button>
+                        </div>
+                        <div className="m-body">
+                            <p style={{ fontSize: 13, lineHeight: 1.5, margin: 0 }}>
+                                This Cash Pay visit is marked Collected. Switching billing
+                                channels keeps the payment details on the appointment, but it
+                                will no longer count as a paid Cash Pay visit.
+                            </p>
+                        </div>
+                        <div className="m-foot">
+                            <button className="btn btn-s" onClick={onCancel}>Cancel</button>
+                            <button className="btn btn-p" onClick={onConfirm}>Confirm &amp; Save</button>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
         function ProvChannelModal({ a, patientDb, onUpdate, onClose, onOpenComments }) {
             const [savingId, setSavingId] = useState(null); // METHODS id currently in flight, or null
             const [errId, setErrId] = useState(null);
@@ -20524,6 +20552,11 @@
 
             const hasCpt = normCpt(localAppt.cpt).length > 0;
             const isSigned = !!localAppt.out;
+            // Cash Pay mode follows the draft channel: no claim to file, so the
+            // insurance/claim fields, Claim Tracking & Payout and the submit
+            // footer are hidden; the Cost Share payment row below is the same
+            // one Clinic Submit uses (same fields as DirectPaySection).
+            const isCashMode = localAppt.method === 'cash';
             const canSubmit = hasCpt && isSigned && localAppt.billing !== 'submitted';
             const isSubmitted = localAppt.billing === 'submitted';
 
@@ -20585,18 +20618,26 @@
             // an unrelated save. Save-only: canSubmit already excludes
             // billing === 'submitted', so this condition can never be true on
             // the Submit path — nothing needed there.
-            const [showChannelWarning, setShowChannelWarning] = useState(false);
+            // null | 'claim' | 'cash' — which warning dialog is open.
+            const [showChannelWarning, setShowChannelWarning] = useState(null);
             function channelSwitchNeedsWarning() {
                 return localAppt.method !== appt.method && appt.method === 'direct' &&
                     localAppt.billing === 'submitted';
             }
+            // Switching a Collected Cash Pay visit to another channel — the Cost
+            // Share fields stay on the row, but it stops counting as paid cash.
+            function cashSwitchNeedsWarning() {
+                return appt.method === 'cash' && localAppt.method !== 'cash' &&
+                    !!localAppt.paymentCollected;
+            }
             function proceedPastChannelWarning() {
-                setShowChannelWarning(false);
+                setShowChannelWarning(null);
                 if (insuranceChanged()) { setPendingInsuranceAction('save'); return; }
                 doHandleSave();
             }
             function handleSave() {
-                if (channelSwitchNeedsWarning()) { setShowChannelWarning(true); return; }
+                if (channelSwitchNeedsWarning()) { setShowChannelWarning('claim'); return; }
+                if (cashSwitchNeedsWarning()) { setShowChannelWarning('cash'); return; }
                 if (insuranceChanged()) { setPendingInsuranceAction('save'); return; }
                 doHandleSave();
             }
@@ -20616,7 +20657,7 @@
                             {/* ── Header ── */}
                             <div className="m-hdr">
                                 <div>
-                                    <div className="m-title">📋 Clinic Submit</div>
+                                    <div className="m-title">{isCashMode ? '💵 Cash Pay' : '📋 Clinic Submit'}</div>
                                     <div className="csm-header-meta">
                                         <span style={{ fontWeight: 700 }}><PatientName name={appt.patient} state={appt.patientState} /></span>
                                         <span>·</span>
@@ -20635,7 +20676,7 @@
 
                                 {/* ── Section 1: Patient Claim Record ── */}
                                 <div className="csm-section csm-static">
-                                    <div className="csm-section-title">🗂 Patient Claim Record</div>
+                                    <div className="csm-section-title">{isCashMode ? '🗂 Billing Channel & Cost Share' : '🗂 Patient Claim Record'}</div>
                                     {/* ── Billing Channel — draft-until-Save, matching BillerApptModal's
                               own meth-opt buttons exactly (same METHODS array, same visual
                               treatment). No switching-INTO-'direct' setup logic exists
@@ -20656,110 +20697,119 @@
                                             ))}
                                         </div>
                                     </div>
-                                    {/* ── Insurance Carrier & Subscriber ── */}
-                                    <div className="csm-fields-group-lbl">Insurance Carrier &amp; Subscriber</div>
-                                    <div className="csm-grid-2">
-                                        <div className="csm-field">
-                                            <label>Claim Submission Gateway</label>
-                                            <select value={claimPlatform} onChange={e => setClaimPlatform(e.target.value)}>
-                                                <option value="">— Select —</option>
-                                                {CLAIM_PLATFORMS.map(p => <option key={p} value={p}>{p}</option>)}
-                                            </select>
-                                        </div>
-                                        <div className="csm-field">
-                                            <label>Insurance Carrier</label>
-                                            <input value={insurance} onChange={e => setInsurance(e.target.value)} placeholder="e.g. Ambetter" />
-                                        </div>
-                                    </div>
-                                    <div className="csm-grid-2">
-                                        <div className="csm-field">
-                                            <label>Group #</label>
-                                            <input value={groupNumber} onChange={e => setGroupNumber(e.target.value)} placeholder="Group number" />
-                                        </div>
-                                        <div className="csm-field">
-                                            <label>Primary Subscriber</label>
-                                            <input value={primarySubscriber} onChange={e => setPrimarySubscriber(e.target.value)} placeholder="Subscriber name" />
-                                        </div>
-                                    </div>
+                                    {/* Claim-only fields — hidden for Cash Pay (no claim to file). */}
+                                    {!isCashMode && (
+                                        <>
+                                            {/* ── Insurance Carrier & Subscriber ── */}
+                                            <div className="csm-fields-group-lbl">Insurance Carrier &amp; Subscriber</div>
+                                            <div className="csm-grid-2">
+                                                <div className="csm-field">
+                                                    <label>Claim Submission Gateway</label>
+                                                    <select value={claimPlatform} onChange={e => setClaimPlatform(e.target.value)}>
+                                                        <option value="">— Select —</option>
+                                                        {CLAIM_PLATFORMS.map(p => <option key={p} value={p}>{p}</option>)}
+                                                    </select>
+                                                </div>
+                                                <div className="csm-field">
+                                                    <label>Insurance Carrier</label>
+                                                    <input value={insurance} onChange={e => setInsurance(e.target.value)} placeholder="e.g. Ambetter" />
+                                                </div>
+                                            </div>
+                                            <div className="csm-grid-2">
+                                                <div className="csm-field">
+                                                    <label>Group #</label>
+                                                    <input value={groupNumber} onChange={e => setGroupNumber(e.target.value)} placeholder="Group number" />
+                                                </div>
+                                                <div className="csm-field">
+                                                    <label>Primary Subscriber</label>
+                                                    <input value={primarySubscriber} onChange={e => setPrimarySubscriber(e.target.value)} placeholder="Subscriber name" />
+                                                </div>
+                                            </div>
 
-                                    {/* ── Member Info ── */}
-                                    <div className="csm-fields-group-lbl">Member Info</div>
-                                    <div className="csm-grid-2">
-                                        <div className="csm-field">
-                                            <label>Member ID</label>
-                                            <input value={memberID} onChange={e => setMemberID(e.target.value)} placeholder="Member ID" />
-                                        </div>
-                                        <div className="csm-field">
-                                            <label>Member DOB</label>
-                                            <input type="date" value={memberDOB} onChange={e => setMemberDOB(e.target.value)} />
-                                        </div>
-                                        <div className="csm-field">
-                                            <label>Patient's State</label>
-                                            <select value={patientState} onChange={e => setPatientState(e.target.value)}>
-                                                <option value="">— Select —</option>
-                                                {US_STATES.map(s => <option key={s} value={s}>{s}</option>)}
-                                            </select>
-                                        </div>
-                                        <div className="csm-field">
-                                            <label>PCN</label>
-                                            <input value={pcn} onChange={e => setPcn(e.target.value)} placeholder="PCN from Tebra" />
-                                        </div>
-                                    </div>
+                                            {/* ── Member Info ── */}
+                                            <div className="csm-fields-group-lbl">Member Info</div>
+                                            <div className="csm-grid-2">
+                                                <div className="csm-field">
+                                                    <label>Member ID</label>
+                                                    <input value={memberID} onChange={e => setMemberID(e.target.value)} placeholder="Member ID" />
+                                                </div>
+                                                <div className="csm-field">
+                                                    <label>Member DOB</label>
+                                                    <input type="date" value={memberDOB} onChange={e => setMemberDOB(e.target.value)} />
+                                                </div>
+                                                <div className="csm-field">
+                                                    <label>Patient's State</label>
+                                                    <select value={patientState} onChange={e => setPatientState(e.target.value)}>
+                                                        <option value="">— Select —</option>
+                                                        {US_STATES.map(s => <option key={s} value={s}>{s}</option>)}
+                                                    </select>
+                                                </div>
+                                                <div className="csm-field">
+                                                    <label>PCN</label>
+                                                    <input value={pcn} onChange={e => setPcn(e.target.value)} placeholder="PCN from Tebra" />
+                                                </div>
+                                            </div>
+                                        </>
+                                    )}
 
                                     {/* ── Provider & Billing ── */}
-                                    <div className="csm-fields-group-lbl">Provider &amp; Billing</div>
+                                    <div className="csm-fields-group-lbl">{isCashMode ? 'Cost Share' : <>Provider &amp; Billing</>}</div>
                                     <div className="csm-grid-2">
-                                        <div className="csm-field">
-                                            <label>Rendering Provider NPI</label>
-                                            {provNpis.rendering.length > 0 ? (
-                                                <select value={renderingNPI} onChange={e => setRenderingNPI(e.target.value)}>
-                                                    <option value="">— Select —</option>
-                                                    {provNpis.rendering.map(n => <option key={n} value={n}>{n}</option>)}
-                                                </select>
-                                            ) : (
-                                                <input value={renderingNPI} onChange={e => setRenderingNPI(e.target.value)} placeholder="10-digit NPI" />
-                                            )}
-                                        </div>
-                                        <div className="csm-field">
-                                            <label>Billing NPI</label>
-                                            {provNpis.billing.length > 0 ? (
-                                                <select value={billingNPI} onChange={e => setBillingNPI(e.target.value)}>
-                                                    <option value="">— Select —</option>
-                                                    {provNpis.billing.map(n => <option key={n} value={n}>{n}</option>)}
-                                                </select>
-                                            ) : (
-                                                <input value={billingNPI} onChange={e => setBillingNPI(e.target.value)} placeholder="10-digit NPI" />
-                                            )}
-                                        </div>
-                                        <div className="csm-field">
-                                            <label>xCode</label>
-                                            <input value={xCode} onChange={e => setXCode(e.target.value)} placeholder="xCode" />
-                                        </div>
-                                        <div className="csm-field">
-                                            <label>💳 Payment Processing Channel</label>
-                                            {(() => {
-                                                const isPreset = PAYMENT_PLATFORMS.includes(paymentPlatform);
-                                                const dropVal = isPreset ? paymentPlatform : (paymentPlatform ? 'Other' : '');
-                                                const isOther = dropVal === 'Other';
-                                                const otherTxt = isOther && paymentPlatform !== 'other' ? paymentPlatform : '';
-                                                return (
-                                                    <>
-                                                        <select value={dropVal} onChange={e => {
-                                                            const v = e.target.value;
-                                                            setPaymentPlatform(v === 'Other' ? 'other' : v);
-                                                        }}>
+                                        {!isCashMode && (
+                                            <>
+                                                <div className="csm-field">
+                                                    <label>Rendering Provider NPI</label>
+                                                    {provNpis.rendering.length > 0 ? (
+                                                        <select value={renderingNPI} onChange={e => setRenderingNPI(e.target.value)}>
                                                             <option value="">— Select —</option>
-                                                            {PAYMENT_PLATFORMS.map(p => <option key={p} value={p}>{p}</option>)}
-                                                            <option value="Other">Other…</option>
+                                                            {provNpis.rendering.map(n => <option key={n} value={n}>{n}</option>)}
                                                         </select>
-                                                        {isOther && (
-                                                            <input style={{ marginTop: 4 }} placeholder="Describe…" value={otherTxt}
-                                                                onChange={e => setPaymentPlatform(e.target.value || 'other')} />
-                                                        )}
-                                                    </>
-                                                );
-                                            })()}
-                                        </div>
+                                                    ) : (
+                                                        <input value={renderingNPI} onChange={e => setRenderingNPI(e.target.value)} placeholder="10-digit NPI" />
+                                                    )}
+                                                </div>
+                                                <div className="csm-field">
+                                                    <label>Billing NPI</label>
+                                                    {provNpis.billing.length > 0 ? (
+                                                        <select value={billingNPI} onChange={e => setBillingNPI(e.target.value)}>
+                                                            <option value="">— Select —</option>
+                                                            {provNpis.billing.map(n => <option key={n} value={n}>{n}</option>)}
+                                                        </select>
+                                                    ) : (
+                                                        <input value={billingNPI} onChange={e => setBillingNPI(e.target.value)} placeholder="10-digit NPI" />
+                                                    )}
+                                                </div>
+                                                <div className="csm-field">
+                                                    <label>xCode</label>
+                                                    <input value={xCode} onChange={e => setXCode(e.target.value)} placeholder="xCode" />
+                                                </div>
+                                                <div className="csm-field">
+                                                    <label>💳 Payment Processing Channel</label>
+                                                    {(() => {
+                                                        const isPreset = PAYMENT_PLATFORMS.includes(paymentPlatform);
+                                                        const dropVal = isPreset ? paymentPlatform : (paymentPlatform ? 'Other' : '');
+                                                        const isOther = dropVal === 'Other';
+                                                        const otherTxt = isOther && paymentPlatform !== 'other' ? paymentPlatform : '';
+                                                        return (
+                                                            <>
+                                                                <select value={dropVal} onChange={e => {
+                                                                    const v = e.target.value;
+                                                                    setPaymentPlatform(v === 'Other' ? 'other' : v);
+                                                                }}>
+                                                                    <option value="">— Select —</option>
+                                                                    {PAYMENT_PLATFORMS.map(p => <option key={p} value={p}>{p}</option>)}
+                                                                    <option value="Other">Other…</option>
+                                                                </select>
+                                                                {isOther && (
+                                                                    <input style={{ marginTop: 4 }} placeholder="Describe…" value={otherTxt}
+                                                                        onChange={e => setPaymentPlatform(e.target.value || 'other')} />
+                                                                )}
+                                                            </>
+                                                        );
+                                                    })()}
+                                                </div>
+                                            </>
+                                        )}
                                         <div className="csm-field">
                                             <label>Cost-Share Classification</label>
                                             <select value={paymentType} onChange={e => setPaymentType(e.target.value)}>
@@ -20776,14 +20826,18 @@
                                                 placeholder={paymentType === 'coinsurance' ? 'e.g. 20%' : 'e.g. 30'} />
                                         </div>
                                     </div>
-                                    <div className="csm-save-row">
-                                        <button className="csm-save-pt-btn" onClick={savePatientRecord} disabled={savingPt}>
-                                            {savingPt ? '⏳ Saving…' : '💾 Save Patient Record'}
-                                        </button>
-                                        {ptSaved
-                                            ? <span className="csm-pt-saved">✅ Saved to patient record</span>
-                                            : <span className="csm-save-note">Persists across all appointments</span>}
-                                    </div>
+                                    {!isCashMode && (
+                                        <>
+                                            <div className="csm-save-row">
+                                                <button className="csm-save-pt-btn" onClick={savePatientRecord} disabled={savingPt}>
+                                                    {savingPt ? '⏳ Saving…' : '💾 Save Patient Record'}
+                                                </button>
+                                                {ptSaved
+                                                    ? <span className="csm-pt-saved">✅ Saved to patient record</span>
+                                                    : <span className="csm-save-note">Persists across all appointments</span>}
+                                            </div>
+                                        </>
+                                    )}
                                 </div>
 
                                 {/* ── Section 2: This Appointment ── */}
@@ -20843,7 +20897,8 @@
 
                                     {/* Provider Note removed — use Comments in the appointment popup instead */}
 
-                                    {/* Payment */}
+                                    {/* Payment — for Cash Pay, Collected + a signed note is what makes it paid */}
+                                    {isCashMode && <div className="csm-row-label">💵 Cash Pay Payment</div>}
                                     <div className="csm-payment-row">
                                         <div className="csm-field" style={{ maxWidth: 130 }}>
                                             <label>Collect ($)</label>
@@ -20948,8 +21003,8 @@
                                     </div>
                                 </div>
 
-                                {/* ── Section 3: Claim Tracking & Payout ── */}
-                                {(() => {
+                                {/* ── Section 3: Claim Tracking & Payout — not for Cash Pay ── */}
+                                {!isCashMode && (() => {
                                     const statusPillCls = claimStatus ? `st-${claimStatus}` : 'st-none';
                                     const statusLabel = claimStatus || 'No Status';
                                     const showPayment = claimStatus === 'Paid' || claimPaidAmount || claimPaidDate || claimCheckID;
@@ -21095,7 +21150,7 @@
                                 <button className="csm-cancel-btn" onClick={onClose}>Cancel</button>
                                 <div className="csm-action-group">
                                     <button className="csm-save-btn" onClick={handleSave}>💾 Save Changes</button>
-                                    {isSubmitted
+                                    {!isCashMode && (isSubmitted
                                         ? <>
                                             <button className="csm-submit-btn done" disabled>✓ Claim Submitted</button>
                                             <button className="csm-submit-undo" title="Undo claim submission"
@@ -21111,7 +21166,7 @@
                                             onClick={canSubmit ? handleSubmit : undefined}
                                             title={!canSubmit ? (isSigned ? 'Add CPT codes first' : 'Awaiting provider signature') : 'Submit claim'}>
                                             🚀 Mark Claim Submitted
-                                        </button>}
+                                        </button>)}
                                 </div>
                             </div>
 
@@ -21149,9 +21204,15 @@
                             }}
                         />
                     )}
-                    {showChannelWarning && (
+                    {showChannelWarning === 'claim' && (
                         <ClaimChannelSwitchWarningDialog
-                            onCancel={() => setShowChannelWarning(false)}
+                            onCancel={() => setShowChannelWarning(null)}
+                            onConfirm={proceedPastChannelWarning}
+                        />
+                    )}
+                    {showChannelWarning === 'cash' && (
+                        <CashChannelSwitchWarningDialog
+                            onCancel={() => setShowChannelWarning(null)}
                             onConfirm={proceedPastChannelWarning}
                         />
                     )}
