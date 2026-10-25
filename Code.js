@@ -3661,8 +3661,8 @@ function _ptSortKey(dateStr) {
 
 /* ── getPaymentTrackerData — "SolBoard Auto" rows only ────────────────────
    Same read pattern as getClaimsLedger: full sheet scan, rowToAppt() per
-   row, filter, enrich, return JSON. Mirrors Claims Ledger's "direct-pay
-   only" restriction (Cost-Share Collection is a Clinic-Submit concept —
+   row, filter, enrich, return JSON. Covers Clinic Submit and Cash Pay
+   only (Cost-Share Collection belongs to those two channels —
    Alma/Headway/Grow copays aren't collected through SolBoard's own
    payment flow), and reuses _checkProvAccess exactly like saveAppointment
    does, so a provider-role caller can never pull another provider's rows
@@ -3712,12 +3712,16 @@ function getPaymentTrackerData(provFilter) {
 
       var appt = rowToAppt(r);
 
-      // Only Clinic Submit (direct) appointments carry a Cost-Share
-      // Collection entry — same rule Claims Ledger uses for claims.
-      if (appt.method !== 'direct') continue;
-      if (!appt.paymentType) continue;  // no Cost-Share Class set — nothing to track
+      // Only Clinic Submit (direct) and Cash Pay (cash) appointments carry
+      // a Cost-Share Collection entry.
+      if (appt.method !== 'direct' && appt.method !== 'cash') continue;
+      // No Cost-Share Class set — nothing to track. Cash Pay rows don't need
+      // one: the channel already marks them as collectable.
+      if (appt.method === 'direct' && !appt.paymentType) continue;
       if (appt.date && appt.date > cutoffStr) continue;  // more than 5 days out
-      if (_isZeroRate(appt.paymentRate)) continue;       // $0 copay — nothing to collect
+      // $0 Clinic Submit has nothing to collect; $0 Cash Pay still needs
+      // Collected (frontend isAutoConfirmedZero()). Blank rates stay in.
+      if (appt.method === 'direct' && _isZeroRate(appt.paymentRate)) continue;
       // No Show / Rescheduled / Cancelled / stale-Tebra-ID rows don't
       // represent a real visit and never show on the main SolBoard
       // calendar — same _isVoidStatus rule as everywhere else in the app
