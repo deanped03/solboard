@@ -3924,6 +3924,18 @@
             border-right: 2px solid var(--success)
         }
 
+        /* Cash Pay cards carry .wk-direct too (same layout and side borders);
+           these only swap the Clinic Submit mint for plum. Hover is darker. */
+        .wk-appt.wk-direct.wk-cash {
+            background: #E6D9E7;
+            border-top-color: #7A4E7E;
+            border-bottom-color: #7A4E7E;
+        }
+
+        .wk-appt.wk-direct.wk-cash:hover {
+            background: #D3BFD5;
+        }
+
         .wk-r1 {
             display: flex;
             align-items: center;
@@ -6669,6 +6681,14 @@
 
         body.dark .wk-appt.wk-direct.wk-post-paid {
             border-right-color: var(--success)
+        }
+
+        body.dark .wk-appt.wk-direct.wk-cash {
+            background: #5F3C63;
+        }
+
+        body.dark .wk-appt.wk-direct.wk-cash:hover {
+            background: #4E3152;
         }
 
         body.dark .wk-pat {
@@ -18331,6 +18351,12 @@
                                                 </span>
                                                 <CommChatIcon appt={a} onOpen={() => setPamModal(a)} />
                                                 {(() => {
+                                                    if (a.out && a.method === 'cash') {
+                                                        const info = isCashSettled(a)
+                                                            ? { label: 'Collected', cls: 'ns-paid', icon: '✅' }
+                                                            : { label: 'Payment due', cls: 'ns-nosub', icon: '💵' };
+                                                        return <span className={`ns-badge ${info.cls}`} title="Cost Share payment — set by Billing">{info.icon} {info.label}</span>;
+                                                    }
                                                     if (a.out) {
                                                         const cs = a.billing === 'submitted' ? (a.claimStatus || 'Pending') : '';
                                                         const info = CLAIM_BADGE_LABELS[cs] || CLAIM_BADGE_LABELS[''];
@@ -19103,7 +19129,7 @@
                                         // has been written back to the sheet yet (e.g. Tebra-synced rows).
                                         const cs = computeStatus(a);
                                         const s = cs === 'valid' ? 'ok' : cs === 'issue' ? 'err' : 'pend';
-                                        const isDirect = a.method === 'direct';
+                                        const isDirect = sharesDirectFields(a.method);
                                         const ic = insColor(a.insuranceCarrier);
                                         const copayAmt = isDirect ? (a.rate ? `$${a.rate}` : '') : (a.copay ? `copay $${a.copay}` : '');
                                         const copayClass = isDirect
@@ -19117,13 +19143,13 @@
                                         // claim-paid) — kept independent of the left border's PRE-VISIT status
                                         // above so a single card can flag both at once (e.g. issue on intake AND
                                         // note still unsigned).
-                                        const isSubmittedPv = a.billing === 'submitted';
-                                        const isPaidPv = isSubmittedPv && a.claimStatus === 'Paid';
+                                        // Cash Pay: collected = paid; signed but not collected = signed.
                                         const postCls = !a.out
                                             ? 'wk-post-notsigned'
-                                            : (isSubmittedPv ? (isPaidPv ? 'wk-post-paid' : 'wk-post-pending') : 'wk-post-signed');
+                                            : isPaidAppt(a) ? 'wk-post-paid'
+                                                : isClaimSubmitted(a) ? 'wk-post-pending' : 'wk-post-signed';
                                         return (
-                                            <div key={a.id} className={`wk-appt wk-${s} ${postCls}${isDirect ? ' wk-direct' : ''}`}
+                                            <div key={a.id} className={`wk-appt wk-${s} ${postCls}${isDirect ? ' wk-direct' : ''}${a.method === 'cash' ? ' wk-cash' : ''}`}
                                                 style={{ cursor: 'pointer' }}
                                                 onClick={e => { e.stopPropagation(); setModal({ a, ds }); }}>
                                                 <div className="wk-r1">
@@ -19142,7 +19168,7 @@
                                                     </div>
                                                 )}
                                                 {/* Claim status stamp — subtle, always visible, secondary info */}
-                                                {a.method !== 'direct' && (() => {
+                                                {!isDirect && (() => {
                                                     const isSubmitted = a.billing === 'submitted';
                                                     const clSt = isSubmitted ? (a.claimStatus || 'Pending') : null;
                                                     const stCls = { Paid: 'wk-cs-paid', Pending: 'wk-cs-pend', Denied: 'wk-cs-denied', Resubmitted: 'wk-cs-resub' }[clSt];
@@ -19153,7 +19179,7 @@
                                                 <div className="wk-bottom-row">
                                                     {!a.out && <div className="wk-note-stamp" title="Note not yet signed">✎ note</div>}
                                                     <span className="wk-ins-badge" style={{ background: METHOD_COLOR[a.method] || 'var(--ink-fill)', color: '#FFFFFF' }}>
-                                                        {isDirect ? 'Clinic Submit' : (METHOD_LABEL[a.method] || a.method)}
+                                                        {METHOD_LABEL[a.method] || a.method}
                                                     </span>
                                                     <CommChatIcon
                                                         appt={a}
@@ -19648,7 +19674,7 @@
                                         // what the day view shows — avoids stale col Y (Status) mismatches.
                                         const cs = computeStatus(a);
                                         const s = cs === 'valid' ? 'ok' : cs === 'issue' ? 'err' : 'pend';
-                                        const isDirect = a.method === 'direct';
+                                        const isDirect = sharesDirectFields(a.method);
                                         const ic = insColor(a.insuranceCarrier);
                                         const provName = (PROVIDERS.find(p => p.id === a.provID) || {}).name || '';
                                         const copayAmt = isDirect ? (a.rate ? `$${a.rate}` : '') : (a.copay ? `copay $${a.copay}` : '');
@@ -19661,13 +19687,13 @@
                                         // Right-border status: POST-VISIT only — same rule as Provider's
                                         // week view, extended here so Assistant and Billing week views
                                         // carry the identical pre/post visual language.
-                                        const isSubmittedPv = a.billing === 'submitted';
-                                        const isPaidPv = isSubmittedPv && a.claimStatus === 'Paid';
+                                        // Cash Pay: collected = paid; signed but not collected = signed.
                                         const postCls = !a.out
                                             ? 'wk-post-notsigned'
-                                            : (isSubmittedPv ? (isPaidPv ? 'wk-post-paid' : 'wk-post-pending') : 'wk-post-signed');
+                                            : isPaidAppt(a) ? 'wk-post-paid'
+                                                : isClaimSubmitted(a) ? 'wk-post-pending' : 'wk-post-signed';
                                         return (
-                                            <div key={a.id} className={`wk-appt wk-${s} ${postCls}${isDirect ? ' wk-direct' : ''}`} onClick={() => onSwitchToDay(ds)}>
+                                            <div key={a.id} className={`wk-appt wk-${s} ${postCls}${isDirect ? ' wk-direct' : ''}${a.method === 'cash' ? ' wk-cash' : ''}`} onClick={() => onSwitchToDay(ds)}>
                                                 <div className="wk-r1">
                                                     <span className="wk-time">{fmtTime(a.time)}</span>
                                                     {a.insuranceCarrier && <span className="wk-ins-badge" style={{ background: ic.bg, color: ic.fg }}>{a.insuranceCarrier}</span>}
@@ -19694,7 +19720,7 @@
                                                         </div>
                                                     </div>
                                                 )}
-                                                {isBilling && a.billing === 'submitted' && (() => {
+                                                {isBilling && isClaimSubmitted(a) && (() => {
                                                     const clSt = a.claimStatus || 'Pending';
                                                     const stCls = { Paid: 'wk-cs-paid', Pending: 'wk-cs-pend', Denied: 'wk-cs-denied', Resubmitted: 'wk-cs-resub' }[clSt] || 'wk-cs-pend';
                                                     const stIcon = { Paid: '✅', Pending: '⏳', Denied: '✗', Resubmitted: '🔄' }[clSt] || '⏳';
@@ -19703,7 +19729,7 @@
                                                 })()}
                                                 <div className="wk-bottom-row">
                                                     <span className="wk-ins-badge" style={{ background: METHOD_COLOR[a.method] || 'var(--ink-fill)', color: '#FFFFFF' }}>
-                                                        {isDirect ? 'Clinic Submit' : (METHOD_LABEL[a.method] || a.method)}
+                                                        {METHOD_LABEL[a.method] || a.method}
                                                     </span>
                                                     {/* Non-billing (assistant) week: chat icon stays in bottom row */}
                                                     {!isBilling && onUpdateForDate && (
