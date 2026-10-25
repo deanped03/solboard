@@ -15661,12 +15661,15 @@
         // /api/best-channel returns as overall_best_channel), and methodId —
         // the appt.method value that channel corresponds to, used to place a
         // pre-visit checklist issue in the ONE column matching that
-        // appointment's actual billing channel, not all four.
+        // appointment's actual billing channel, not all of them.
+        // Cash Pay has no Best Channel API name; its `api` value is only the
+        // column's React key and is never sent to the API.
         const AF_RATE_CHANNELS = [
             { label: 'Alma', api: 'Alma', methodId: 'alma' },
             { label: 'Headway', api: 'Headway', methodId: 'hw' },
             { label: 'Grow', api: 'Grow Therapy', methodId: 'grow' },
             { label: 'Clinic', api: 'Clinic Submit', methodId: 'direct' },
+            { label: 'Cash Pay', api: 'Cash Pay', methodId: 'cash' },
         ];
 
         // Table View's rate/billing-column access — Provider window only,
@@ -15683,12 +15686,14 @@
             if (!loggedInProv || loggedInProv === 'jodene') {
                 return { channels: AF_RATE_CHANNELS, showBestRate: true, showCcTebra: true };
             }
+            // Lori: Alma, Clinic and Cash Pay columns (Cash Pay so her own
+            // Cash Pay patients' checklist flags stay visible).
             if (loggedInProv === 'lori') {
-                return { channels: AF_RATE_CHANNELS.filter(ch => ch.methodId === 'alma' || ch.methodId === 'direct'), showBestRate: false, showCcTebra: false };
+                return { channels: AF_RATE_CHANNELS.filter(ch => ch.methodId === 'alma' || ch.methodId === 'direct' || ch.methodId === 'cash'), showBestRate: false, showCcTebra: false };
             }
             // katie, or any other provider not explicitly listed (e.g. megan) —
-            // the default "no rate access" baseline: all 4 channels, no Best
-            // Rate, no CC Tebra.
+            // the default "no rate access" baseline: every channel column, no
+            // Best Rate, no CC Tebra.
             return { channels: AF_RATE_CHANNELS, showBestRate: false, showCcTebra: false };
         }
 
@@ -15934,8 +15939,9 @@
                     if (Boolean(a.out) !== wantSigned) return false;
                 }
                 if (filters.billingSubmitStatus) {
+                    // Cash Pay has no claim, so it matches neither choice.
                     const wantSubmitted = filters.billingSubmitStatus === 'submitted';
-                    if ((a.billing === 'submitted') !== wantSubmitted) return false;
+                    if (!(wantSubmitted ? isClaimSubmitted(a) : isClaimNotSubmitted(a))) return false;
                 }
                 return true;
             }), [listRows, filters]);
@@ -16231,10 +16237,10 @@
                                 15.6px, computed independently of this same row's
                                 Patient Name size change so the two don't compound. */}
                             <PatientName name={appt.patient} state={appt.patientState} stateFontSize="15.6px" />
-                            {(appt.out || appt.billing === 'submitted') && (
+                            {(appt.out || isClaimSubmitted(appt)) && (
                                 <div className="af-cell-signals">
                                     {appt.out && <span className="af-cell-signal">Clinical Note Signed</span>}
-                                    {appt.billing === 'submitted' && <span className="af-cell-signal">Claim Submitted</span>}
+                                    {isClaimSubmitted(appt) && <span className="af-cell-signal">Claim Submitted</span>}
                                 </div>
                             )}
                         </div>
@@ -16687,9 +16693,11 @@
                                         <ChecklistFlagToggle label="Intake" value={appt.intake} by={appt.intakeBy} at={appt.intakeAt}
                                             saving={!!savingFields.intake} error={!!errorFields.intake}
                                             onClick={() => handleFieldSave('intake', 'saveIntake', cycleTriState(appt.intake))} />
-                                        <ChecklistFlagToggle label="Insurance" value={appt.ins} by={appt.insBy} at={appt.insAt}
-                                            saving={!!savingFields.ins} error={!!errorFields.ins}
-                                            onClick={() => handleFieldSave('ins', 'saveInsVerified', cycleTriState(appt.ins))} />
+                                        {ch.methodId !== 'cash' && (
+                                            <ChecklistFlagToggle label="Insurance" value={appt.ins} by={appt.insBy} at={appt.insAt}
+                                                saving={!!savingFields.ins} error={!!errorFields.ins}
+                                                onClick={() => handleFieldSave('ins', 'saveInsVerified', cycleTriState(appt.ins))} />
+                                        )}
                                         <ChecklistFlagToggle label="Autopay" value={appt.autopay} by={appt.autopayBy} at={appt.autopayAt}
                                             saving={!!savingFields.autopay} error={!!errorFields.autopay}
                                             onClick={() => handleFieldSave('autopay', 'saveAutopay', cycleTriState(appt.autopay))} />
@@ -18724,6 +18732,11 @@
             const realCpts = normCpt(currentCpts);
 
             function fetchRate(cptsForQuery) {
+                // Cash Pay visits bill no insurance, so there are no rates to compare.
+                if (currentMethod === 'cash') {
+                    setData({ cashPay: true });
+                    return;
+                }
                 if (!carrier || carrier.toLowerCase().includes('cash')) {
                     setData({ mapped: false, raw_carrier: carrier || 'No carrier' });
                     return;
@@ -18847,6 +18860,11 @@
                                     </div>
                                     {loading && <div style={{ textAlign: 'center', color: '#777355', padding: '24px 0' }}>Checking rates…</div>}
                                     {data && !loading && (() => {
+                                        if (data.cashPay) return (
+                                            <div style={{ color: '#777355', fontSize: 13, textAlign: 'center', padding: '20px 0' }}>
+                                                <strong>Cash Pay</strong> visit: no insurance rates to compare
+                                            </div>
+                                        );
                                         if (data.error || !data.mapped) return (
                                             <div style={{ color: '#777355', fontSize: 13, textAlign: 'center', padding: '20px 0' }}>
                                                 No rates on file for <strong>{carrier || 'this carrier'}</strong>
