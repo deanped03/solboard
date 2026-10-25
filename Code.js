@@ -1858,19 +1858,20 @@ function testUnsignedRowList(provID) {
 /* ════════════════════════════════════════════════════════════════════
    OVERDUE DIRECT-PAY COLLECTIONS — getOverdueDirectPay
    ════════════════════════════════════════════════════════════════════
-   Scans every direct-pay appointment (BillingChannel === 'direct') for
-   an uncollected copay / coinsurance / cash-pay / deductible balance
-   whose appointment date is 30+ days in the past. Powers the header-
-   level "Cost Share Overdue" alert so a biller sees it regardless of
-   which window/date they're currently viewing — mirrors
-   getTotalUnsignedCount()'s cross-date scan pattern.
+   Scans every Clinic Submit and Cash Pay appointment (BillingChannel
+   'direct' or 'cash') for an uncollected copay / coinsurance /
+   cash-pay / deductible balance whose appointment date is 30+ days in
+   the past. Powers the header-level "Cost Share Overdue" alert so a
+   biller sees it regardless of which window/date they're currently
+   viewing — mirrors getTotalUnsignedCount()'s cross-date scan pattern.
 
-   A row counts only if: method is direct, the visit actually occurred
-   (same _visitOccurred rule as unsigned-note counting), the patient
-   isn't a placeholder/calendar-block row, PaymentCollected isn't TRUE,
-   and CostShareRate is set to a genuine non-zero value (blank/$0 rows
-   have nothing to collect, so they're excluded — same rule the Billing
-   Day view's DirectPaySection already uses via isZeroRate()).
+   A row counts only if: method is direct or cash, the visit actually
+   occurred (same _visitOccurred rule as unsigned-note counting), the
+   patient isn't a placeholder/calendar-block row, PaymentCollected isn't
+   TRUE, and CostShareRate is set. A $0 Clinic Submit rate has nothing to
+   collect and is excluded (same rule as the Billing Day view's
+   isAutoConfirmedZero()); a $0 Cash Pay visit still needs Collected
+   checked, so it stays in. Blank-rate rows are excluded for both.
    ════════════════════════════════════════════════════════════════════ */
 function getOverdueDirectPay() {
   try {
@@ -1897,18 +1898,19 @@ function getOverdueDirectPay() {
     for (var i = 1; i < rows.length; i++) {
       var r = rows[i];
 
-      if (String(r[METHOD_IDX] || '') !== 'direct') continue;
+      var method = String(r[METHOD_IDX] || '');
+      if (method !== 'direct' && method !== 'cash') continue;
 
       var collected = r[COLLECTED_IDX];
       var isCollected = collected === true || String(collected).trim().toUpperCase() === 'TRUE';
       if (isCollected) continue;
 
-      // Genuine, non-zero rate only — blank or $0/0% rows have nothing to
-      // collect (same rule as the frontend's isZeroRate()).
+      // Rate must be set. $0/0% Clinic Submit rows have nothing to collect;
+      // $0 Cash Pay rows still need Collected (frontend isAutoConfirmedZero()).
       var rawRate = r[RATE_IDX];
       if (rawRate === null || rawRate === undefined || rawRate === '') continue;
       var rateNum = parseFloat(String(rawRate).replace(/[$%,\s]/g, ''));
-      if (isNaN(rateNum) || rateNum === 0) continue;
+      if (isNaN(rateNum) || (rateNum === 0 && method === 'direct')) continue;
 
       var tebraStatus = TEBRA_IDX >= 0 ? String(r[TEBRA_IDX] || '') : '';
       if (!_visitOccurred(tebraStatus)) continue;
