@@ -19384,7 +19384,13 @@
            submittedWithinSigned = Math.min(submittedAppts.
            length, S) clamps this: the "un-signed after being submitted"
            backlog simply doesn't get outer-ring color until the note is
-           re-signed, rather than corrupting the whole ring. ════════════ */
+           re-signed, rather than corrupting the whole ring.
+
+           Cash Pay (Stage 2): signed Cash Pay visits have no claim, so they
+           sit outside NS/P/DN/RS. Signed but not collected = CD ("Cash due",
+           plum, between Resubmitted and Paid); collected = counted in PD.
+           The claim counts are derived from S minus the signed Cash Pay
+           visits, so NS + P + DN + RS + CD + PD === S still holds. ════════════ */
         function WeekDualRing({ appts, ds }) {
             const T = appts.length;
             const cx = 46, cy = 46;
@@ -19410,9 +19416,13 @@
 
             const U = appts.filter(a => !a.out).length;
             const S = T - U;
-            const submittedAppts = appts.filter(a => a.billing === 'submitted');
-            const submittedWithinSigned = Math.min(submittedAppts.length, S);
-            const NS = S - submittedWithinSigned;
+            const signedCash = appts.filter(a => a.out && a.method === 'cash');
+            const CD = signedCash.filter(isCashDue).length;
+            const cashPaid = signedCash.length - CD;
+            const claimS = S - signedCash.length;
+            const submittedAppts = appts.filter(isClaimSubmitted);
+            const submittedWithinSigned = Math.min(submittedAppts.length, claimS);
+            const NS = claimS - submittedWithinSigned;
             // Same status definitions as BillingView's ClaimDayBanner (2026-10-08):
             // Denied / Resubmitted / Paid are exact matches; Pending is everything
             // else submitted — derived by subtraction below, so a blank/'Pending'
@@ -19423,11 +19433,12 @@
             const rawResub = submittedAppts.filter(a => a.claimStatus === 'Resubmitted').length;
             // Capped in turn against what's left of submittedWithinSigned, so even
             // when the clamp above bites no count can go negative and
-            // NS + P + DN + RS + PD === S always holds.
-            const PD = Math.min(rawPaid, submittedWithinSigned);
-            const DN = Math.min(rawDenied, submittedWithinSigned - PD);
-            const RS = Math.min(rawResub, submittedWithinSigned - PD - DN);
-            const P = submittedWithinSigned - PD - DN - RS;
+            // NS + P + DN + RS + CD + PD === S always holds.
+            const claimPD = Math.min(rawPaid, submittedWithinSigned);
+            const DN = Math.min(rawDenied, submittedWithinSigned - claimPD);
+            const RS = Math.min(rawResub, submittedWithinSigned - claimPD - DN);
+            const P = submittedWithinSigned - claimPD - DN - RS;
+            const PD = claimPD + cashPaid;
 
             const cIn = 2 * Math.PI * rIn;
             const cOut = 2 * Math.PI * rOut;
@@ -19443,7 +19454,8 @@
                 pending: `Claim submitted, payment pending (${P})`,
                 denied: `Claim denied (${DN})`,
                 resub: `Claim resubmitted (${RS})`,
-                paid: `Claim submitted and paid (${PD})`,
+                cashDue: `Cash Pay signed, payment not yet collected (${CD})`,
+                paid: `Claim paid or Cash Pay collected (${PD})`,
             };
 
             const counts = appts.reduce((acc, a) => {
@@ -19512,9 +19524,15 @@
                                     <title>{tip.resub}</title>
                                 </circle>
                             )}
+                            {CD > 0 && (
+                                <circle cx={cx} cy={cy} r={rOut} fill="none" stroke="#7A4E7E" strokeWidth={swOut}
+                                    strokeDasharray={dasharray(CD / T, cOut)} strokeDashoffset={offset((U + NS + P + DN + RS) / T, cOut)} transform={rot}>
+                                    <title>{tip.cashDue}</title>
+                                </circle>
+                            )}
                             {PD > 0 && (
                                 <circle cx={cx} cy={cy} r={rOut} fill="none" stroke="#447433" strokeWidth={swOut}
-                                    strokeDasharray={dasharray(PD / T, cOut)} strokeDashoffset={offset((U + NS + P + DN + RS) / T, cOut)} transform={rot}>
+                                    strokeDasharray={dasharray(PD / T, cOut)} strokeDashoffset={offset((U + NS + P + DN + RS + CD) / T, cOut)} transform={rot}>
                                     <title>{tip.paid}</title>
                                 </circle>
                             )}
@@ -19535,6 +19553,7 @@
                             <div className="wkdr-legend-item" title={tip.pending}><span className="wkdr-dot" style={{ background: '#fdef54' }} />Pending <b>{P}</b></div>
                             {DN > 0 && <div className="wkdr-legend-item" title={tip.denied}><span className="wkdr-dot" style={{ background: '#000000' }} />Denied <b>{DN}</b></div>}
                             {RS > 0 && <div className="wkdr-legend-item" title={tip.resub}><span className="wkdr-dot" style={{ background: '#3D768A' }} />Resub. <b>{RS}</b></div>}
+                            {CD > 0 && <div className="wkdr-legend-item" title={tip.cashDue}><span className="wkdr-dot" style={{ background: '#7A4E7E' }} />Cash due <b>{CD}</b></div>}
                             <div className="wkdr-legend-item" title={tip.paid}><span className="wkdr-dot" style={{ background: '#447433' }} />Paid <b>{PD}</b></div>
                         </div>
                         <div className="wkdr-legend">
@@ -19545,6 +19564,7 @@
                             <div className="wkdr-legend-item" title={tip.pending}><span className="wkdr-dot" style={{ background: '#fdef54' }} />Pending <b>{P}</b></div>
                             {DN > 0 && <div className="wkdr-legend-item" title={tip.denied}><span className="wkdr-dot" style={{ background: '#000000' }} />Denied <b>{DN}</b></div>}
                             {RS > 0 && <div className="wkdr-legend-item" title={tip.resub}><span className="wkdr-dot" style={{ background: '#3D768A' }} />Resubmitted <b>{RS}</b></div>}
+                            {CD > 0 && <div className="wkdr-legend-item" title={tip.cashDue}><span className="wkdr-dot" style={{ background: '#7A4E7E' }} />Cash due <b>{CD}</b></div>}
                             <div className="wkdr-legend-item" title={tip.paid}><span className="wkdr-dot" style={{ background: '#447433' }} />Paid <b>{PD}</b></div>
                         </div>
                     </div>
