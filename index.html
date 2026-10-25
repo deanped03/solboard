@@ -24029,7 +24029,7 @@
                                         setOverdueOpen(false);
                                     }}>
                                         <span className="overdue-row-name"><PatientName name={it.patient} state={it.patientState} /></span>
-                                        <span className="overdue-row-amt">{String(it.rate).includes('%') ? it.rate : `$${parseFloat(it.rate).toFixed(2)}`}</span>
+                                        <span className="overdue-row-amt">{String(it.rate).trim() === '' ? 'No rate set' : String(it.rate).includes('%') ? it.rate : `$${parseFloat(it.rate).toFixed(2)}`}</span>
                                         <span className="overdue-row-type">{OVERDUE_TYPE_LABELS[it.paymentType] || it.paymentType || '—'}</span>
                                         <span className="overdue-row-date">{fmtShort(it.date)} · {it.daysSince}d</span>
                                     </button>

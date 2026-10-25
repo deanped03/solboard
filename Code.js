@@ -1867,11 +1867,12 @@ function testUnsignedRowList(provID) {
 
    A row counts only if: method is direct or cash, the visit actually
    occurred (same _visitOccurred rule as unsigned-note counting), the
-   patient isn't a placeholder/calendar-block row, PaymentCollected isn't
-   TRUE, and CostShareRate is set. A $0 Clinic Submit rate has nothing to
-   collect and is excluded (same rule as the Billing Day view's
-   isAutoConfirmedZero()); a $0 Cash Pay visit still needs Collected
-   checked, so it stays in. Blank-rate rows are excluded for both.
+   patient isn't a placeholder/calendar-block row, and PaymentCollected
+   isn't TRUE. A $0 Clinic Submit rate has nothing to collect and is
+   excluded (same rule as the Billing Day view's isAutoConfirmedZero());
+   a $0 Cash Pay visit still needs Collected checked, so it stays in.
+   A blank rate excludes a Clinic Submit row but not a Cash Pay row: an
+   unpriced cash visit is still owed (the alert shows "No rate set").
    ════════════════════════════════════════════════════════════════════ */
 function getOverdueDirectPay() {
   try {
@@ -1905,12 +1906,18 @@ function getOverdueDirectPay() {
       var isCollected = collected === true || String(collected).trim().toUpperCase() === 'TRUE';
       if (isCollected) continue;
 
-      // Rate must be set. $0/0% Clinic Submit rows have nothing to collect;
-      // $0 Cash Pay rows still need Collected (frontend isAutoConfirmedZero()).
+      // Clinic Submit needs a nonzero rate; $0/0% has nothing to collect.
+      // Cash Pay stays in at $0 or blank: it still needs Collected
+      // (frontend isAutoConfirmedZero()).
       var rawRate = r[RATE_IDX];
-      if (rawRate === null || rawRate === undefined || rawRate === '') continue;
-      var rateNum = parseFloat(String(rawRate).replace(/[$%,\s]/g, ''));
-      if (isNaN(rateNum) || (rateNum === 0 && method === 'direct')) continue;
+      var rateBlank = rawRate === null || rawRate === undefined || String(rawRate).trim() === '';
+      if (rateBlank) {
+        if (method === 'direct') continue;
+        rawRate = '';
+      } else {
+        var rateNum = parseFloat(String(rawRate).replace(/[$%,\s]/g, ''));
+        if (isNaN(rateNum) || (rateNum === 0 && method === 'direct')) continue;
+      }
 
       var tebraStatus = TEBRA_IDX >= 0 ? String(r[TEBRA_IDX] || '') : '';
       if (!_visitOccurred(tebraStatus)) continue;
