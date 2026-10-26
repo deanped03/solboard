@@ -13066,7 +13066,15 @@
             if (id !== cur) return 'mthd-btn';
             return `mthd-btn on-${id === 'hw' ? 'hw' : id === 'grow' ? 'grow' : id === 'direct' ? 'direct' : id === 'cash' ? 'cash' : 'alma'}`;
         }
-        function newId() { return Math.random().toString(36).slice(2, 11); }
+        // 9 characters, a–z/0–9. Math.random().toString(36) can come out short
+        // (or empty), and an ID like "123456789" or "12e456789" would be stored
+        // by Sheets as a number, so retry until it's neither.
+        function newId() {
+            for (;;) {
+                const id = Math.random().toString(36).slice(2, 11);
+                if (/^[a-z0-9]{9}$/.test(id) && isNaN(Number(id))) return id;
+            }
+        }
         function newAppt(time, patient, method, directIns, paymentType, paymentRate) {
             const isPercent = paymentRate && paymentRate.includes('%');
             return {
@@ -23501,6 +23509,15 @@
                 // When viewing all-providers (prov=""), the key has no provider segment.
                 // Fall back to the appointment's own provID so GAS doesn't corrupt col A.
                 const effectivePr = pr || (updated && updated.provID) || '';
+                // Same refusal as saveAppointment: a blank id would match the
+                // first ID-less row in the sheet, which may be another visit.
+                if (!String((updated && updated.id) || '').trim()) {
+                    const error = 'This appointment has no ID, so the change was not saved. ' +
+                        'Reload the page; if it happens again, the row needs an ApptID in the Appointments tab.';
+                    setSaveStatus('error');
+                    alert(error);
+                    return Promise.resolve({ ok: false, error });
+                }
                 setSaveStatus('saving');
                 // Returned so callers that need to SEQUENCE a follow-up save (e.g. the
                 // CPT-save → auto-sign-note flow in ProviderView.saveCpt) can await
@@ -23803,6 +23820,11 @@
                 persistAppt(key, a);
             }
             function deleteAppt(apptId) {
+                if (!String(apptId || '').trim()) {
+                    alert('This appointment has no ID, so it was not deleted. ' +
+                        'Reload the page; if it happens again, the row needs an ApptID in the Appointments tab.');
+                    return;
+                }
                 setData(p => {
                     const next = { ...p };
                     Object.keys(next).forEach(k => { if (Array.isArray(next[k])) next[k] = next[k].filter(a => a.id !== apptId); });

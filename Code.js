@@ -676,9 +676,18 @@ function getLastCodedAppointment(patientName, provID) {
    WRITE — APPOINTMENTS
 ════════════════════════════════════════════════════════════════ */
 
+// saveAppointment and deleteAppointment find their row by ApptID; with a
+// blank id that match would land on the first ID-less row in the sheet,
+// which may be a different visit, so both refuse a blank id.
+var BLANK_APPT_ID_SAVE_ERROR = 'This appointment has no ID, so the change was not saved. ' +
+  'Reload the page; if it happens again, the row needs an ApptID in the Appointments tab.';
+var BLANK_APPT_ID_DELETE_ERROR = 'This appointment has no ID, so it was not deleted. ' +
+  'Reload the page; if it happens again, the row needs an ApptID in the Appointments tab.';
+
 function saveAppointment(prov, date, apptJson) {
   try {
     const appt = JSON.parse(apptJson);
+    if (!String(appt.id || '').trim()) return JSON.stringify({ error: BLANK_APPT_ID_SAVE_ERROR });
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     const deny = _checkProvAccess(ss, prov);
     if (deny) return deny;
@@ -2201,6 +2210,7 @@ function _normalizeDateStr(d) {
 
 function deleteAppointment(apptId) {
   try {
+    if (!String(apptId || '').trim()) return JSON.stringify({ error: BLANK_APPT_ID_DELETE_ERROR });
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     const sheet = ss.getSheetByName(TAB_APPT);
     if (!sheet || sheet.getLastRow() < 2) return JSON.stringify({ error: 'No appointments found' });
