@@ -702,6 +702,31 @@ function saveAppointment(prov, date, apptJson) {
       }
     }
 
+    // Signing or unsigning through a save follows the same rule as
+    // signNoteAndClearUnsigned (_signDenial), checked against the row's own
+    // ProvID. A refused save writes nothing. Assistants have no sign
+    // control, so a mismatched `out` from them is a stale page (the note
+    // was signed after they loaded it): keep the sheet's Signed value and
+    // save the rest of their edit.
+    const SIGNED_COL_IDX = APPT_COLS.indexOf('Signed');
+    const sheetSigned = targetRow > 0 &&
+      (values[targetRow - 1][SIGNED_COL_IDX] === true ||
+        String(values[targetRow - 1][SIGNED_COL_IDX]).trim().toUpperCase() === 'TRUE');
+    if (!!appt.out !== sheetSigned) {
+      const saver = _getStaffRecord(ss, Session.getActiveUser().getEmail());
+      const rowProv = targetRow > 0 ? values[targetRow - 1][APPT_COLS.indexOf('ProvID')] : prov;
+      const isAssistant = !!saver && saver.role === 'assistant';
+      if (isAssistant) appt.out = sheetSigned;
+      const denial = isAssistant ? '' : _signDenial(saver, rowProv);
+      if (denial) {
+        return JSON.stringify({
+          error: denial + ' Nothing was saved. If you didn\'t change the signature, it changed ' +
+            'after you opened this appointment: reload the page and make your edit again.',
+          signDenied: true,
+        });
+      }
+    }
+
     const TIME_COL = APPT_COLS.indexOf('Time') + 1;
     const UNSIGNED_COL = APPT_COLS.indexOf('UnsignedDates') + 1;
 
@@ -1056,6 +1081,20 @@ function _normName(s) {
   return String(s || '').toLowerCase().replace(/\s+/g, ' ').trim();
 }
 
+// Who may mark a note signed or unsigned (Dean, 2026-10-26): a provider on
+// their own rows only, the biller role on any row, nobody else. Used by
+// signNoteAndClearUnsigned and by saveAppointment when `out` changes. The
+// Tebra sync's Checked Out auto-sign writes Signed directly and doesn't go
+// through this. Returns '' when allowed, otherwise the reason to show.
+function _signDenial(staff, rowProvID) {
+  if (staff && staff.role === 'biller') return '';
+  if (staff && staff.role === 'provider') {
+    if (staff.provID && staff.provID === String(rowProvID || '').trim()) return '';
+    return 'You can only sign or unsign your own notes.';
+  }
+  return "Only the note's provider or the biller can sign or unsign a note.";
+}
+
 function signNoteAndClearUnsigned(apptId, signedISO, patient) {
   try {
     var ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -1085,6 +1124,10 @@ function signNoteAndClearUnsigned(apptId, signedISO, patient) {
     for (var i = 1; i < data.length; i++) {
       var rowId = String(data[i][COL_ID - 1] || '').trim();
       if (rowId !== idN) continue;
+      var denial = _signDenial(staff, data[i][PROV_IDX]);
+      if (denial) {
+        return JSON.stringify({ ok: false, error: denial + ' The note was not marked signed.', signDenied: true });
+      }
       sheet.getRange(i + 1, COL_SIGNED).setValue(true);
       data[i][SIGNED_IDX] = true;  // keep in-memory copy in sync for the reconcile pass below
       signed++;

@@ -23539,6 +23539,7 @@
                                 if (r && r.error) {
                                     console.error('[CRB] saveAppointment error:', r.error, '| prov:', pr, '| date:', dt, '| id:', updated && updated.id);
                                     setSaveStatus('error');
+                                    if (r.signDenied) alert(r.error);
                                     return { ok: false, error: r.error };
                                 }
                             } catch (e) { /* non-JSON response — treat as ok */ }
@@ -23701,6 +23702,7 @@
                             if (!res || res.ok === false || res.error) {
                                 rollback();
                                 setSaveStatus('error');
+                                if (res && res.signDenied) alert(res.error);
                                 setTimeout(() => setSaveStatus('idle'), 3000);
                                 return { ok: false, error: (res && res.error) || 'Unknown error' };
                             }
