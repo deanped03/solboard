@@ -23506,9 +23506,6 @@
 
             function persistAppt(k, updated) {
                 const [pr, dt] = k.split('||');
-                // When viewing all-providers (prov=""), the key has no provider segment.
-                // Fall back to the appointment's own provID so GAS doesn't corrupt col A.
-                const effectivePr = pr || (updated && updated.provID) || '';
                 // Same refusal as saveAppointment: a blank id would match the
                 // first ID-less row in the sheet, which may be another visit.
                 if (!String((updated && updated.id) || '').trim()) {
@@ -23532,7 +23529,7 @@
                 // ProviderView's saveCpt, which shows a retry banner on failure
                 // instead of just the transient header indicator) now can.
                 return queueApptSave(updated && updated.id, () =>
-                    gsr('saveAppointment', effectivePr, dt, JSON.stringify(updated))
+                    gsr('saveAppointment', pr, dt, JSON.stringify(updated))
                         .then(raw => {
                             try {
                                 const r = raw ? JSON.parse(raw) : {};
@@ -23802,7 +23799,10 @@
             }
 
             function updateApptForDate(ds, updated) {
-                const k = dkey(prov, ds);
+                // The Assistant and Billing week views list every provider's
+                // appointments, so the key comes from the appointment's own
+                // provider, not the one picked in the header.
+                const k = dkey((updated && updated.provID) || prov, ds);
                 // Patch day/provider-week cache
                 setData(p => ({ ...p, [k]: (p[k] || []).map(a => a.id === updated.id ? updated : a) }));
                 // Patch assistant/billing week cache (allWeekData keyed by date string)
