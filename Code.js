@@ -2305,6 +2305,12 @@ function deleteAppointment(apptId) {
 
     if (targetRow < 0) return JSON.stringify({ error: 'Appointment not found: ' + apptId });
 
+    // Same rule as saveAppointment, against the row's own ProvID.
+    const accessDenial = _apptAccessDenial(
+      _getStaffRecord(ss, Session.getActiveUser().getEmail()),
+      values[targetRow - 1][APPT_COLS.indexOf('ProvID')]);
+    if (accessDenial) return JSON.stringify({ error: accessDenial + ' Nothing was deleted.', accessDenied: true });
+
     sheet.deleteRow(targetRow);
     _audit(ss, 'DELETE', `${patientName} | ${apptDate} | ${apptId}`);
     SpreadsheetApp.flush();
