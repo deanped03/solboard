@@ -23539,7 +23539,7 @@
                                 if (r && r.error) {
                                     console.error('[CRB] saveAppointment error:', r.error, '| prov:', pr, '| date:', dt, '| id:', updated && updated.id);
                                     setSaveStatus('error');
-                                    if (r.signDenied) alert(r.error);
+                                    if (r.signDenied || r.accessDenied) alert(r.error);
                                     return { ok: false, error: r.error };
                                 }
                             } catch (e) { /* non-JSON response — treat as ok */ }

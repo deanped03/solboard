@@ -683,14 +683,31 @@ var BLANK_APPT_ID_SAVE_ERROR = 'This appointment has no ID, so the change was no
   'Reload the page; if it happens again, the row needs an ApptID in the Appointments tab.';
 var BLANK_APPT_ID_DELETE_ERROR = 'This appointment has no ID, so it was not deleted. ' +
   'Reload the page; if it happens again, the row needs an ApptID in the Appointments tab.';
+var BLANK_PROV_UPDATE_ERROR = 'This appointment has no provider in the Appointments tab, so the change ' +
+  'was not saved. The biller needs to fill in its ProvID (column A) first.';
+var BLANK_PROV_CREATE_ERROR = 'No provider is selected, so the appointment was not created. ' +
+  'Pick a provider and try again.';
+
+// Who may change an appointment row: staff whose role is provider,
+// assistant or biller, and a provider only on rows whose ProvID is their
+// own. Always checked against the row's ProvID on the sheet (for a new row,
+// the provider it's being created under), never a provider the browser
+// sent for an existing row. Returns '' when allowed, otherwise the reason.
+function _apptAccessDenial(staff, rowProvID) {
+  if (!staff || ['provider', 'assistant', 'biller'].indexOf(staff.role) < 0) {
+    return 'Access denied: your account is not set up on the Staff tab.';
+  }
+  if (staff.role === 'provider' && (!staff.provID || staff.provID !== String(rowProvID || '').trim())) {
+    return 'You can only change your own appointments.';
+  }
+  return '';
+}
 
 function saveAppointment(prov, date, apptJson) {
   try {
     const appt = JSON.parse(apptJson);
     if (!String(appt.id || '').trim()) return JSON.stringify({ error: BLANK_APPT_ID_SAVE_ERROR });
     const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const deny = _checkProvAccess(ss, prov);
-    if (deny) return deny;
     const sheet = ss.getSheetByName(TAB_APPT);
 
     const values = sheet.getDataRange().getValues();
@@ -701,6 +718,21 @@ function saveAppointment(prov, date, apptJson) {
         break;
       }
     }
+
+    // An update keeps the row's own ProvID and Date: no screen moves an
+    // appointment, and a save that sent another provider (the all-provider
+    // week views sent the header's) used to rewrite column A with it. From
+    // here on prov and date are the row's, so the write and the audit entry
+    // below use them. A blank ProvID is never written, on either path.
+    if (targetRow > 0) {
+      prov = String(values[targetRow - 1][APPT_COLS.indexOf('ProvID')] || '').trim();
+      date = _fmtDate(values[targetRow - 1][APPT_COLS.indexOf('Date')]) || date;
+      if (!prov) return JSON.stringify({ error: BLANK_PROV_UPDATE_ERROR, accessDenied: true });
+    } else if (!String(prov || '').trim()) {
+      return JSON.stringify({ error: BLANK_PROV_CREATE_ERROR, accessDenied: true });
+    }
+    const accessDenial = _apptAccessDenial(_getStaffRecord(ss, Session.getActiveUser().getEmail()), prov);
+    if (accessDenial) return JSON.stringify({ error: accessDenial + ' Nothing was saved.', accessDenied: true });
 
     // Signing or unsigning through a save follows the same rule as
     // signNoteAndClearUnsigned (_signDenial), checked against the row's own
