@@ -703,6 +703,35 @@ function _apptAccessDenial(staff, rowProvID) {
   return '';
 }
 
+// Appointment Flow lets Jodene switch to any provider (the frontend's
+// allowSwitch, userProvID === 'jodene') and use the controls there, so the
+// writers Appointment Flow calls let her change any provider's row (Dean,
+// 2026-10-28). Only those writers pass appointmentFlow to
+// _apptWriteDenialJson; saveAppointment, signing and delete stay strict.
+var APPT_FLOW_ALL_PROVIDERS_PROVID = 'jodene';
+function _apptFlowAccessDenial(staff, rowProvID) {
+  if (staff && staff.role === 'provider' && staff.provID === APPT_FLOW_ALL_PROVIDERS_PROVID) return '';
+  return _apptAccessDenial(staff, rowProvID);
+}
+
+// The refusal reply for the current user changing an appointment row whose
+// ProvID is rowProvID, or '' when allowed. errKey is the writer's own error
+// field ('err' or 'error'), so callers keep reading the shape they already
+// read.
+function _apptWriteDenialJson(ss, rowProvID, errKey, appointmentFlow) {
+  var staff = _getStaffRecord(ss, Session.getActiveUser().getEmail());
+  var denial = appointmentFlow ? _apptFlowAccessDenial(staff, rowProvID) : _apptAccessDenial(staff, rowProvID);
+  if (!denial) return '';
+  var reply = { ok: false, accessDenied: true };
+  reply[errKey] = denial + ' Nothing was saved.';
+  return JSON.stringify(reply);
+}
+
+// ProvID of a 1-based Appointments row found with _findApptRow.
+function _apptRowProvID(sheet, rowNum) {
+  return sheet.getRange(rowNum, APPT_COLS.indexOf('ProvID') + 1).getValue();
+}
+
 function saveAppointment(prov, date, apptJson) {
   try {
     const appt = JSON.parse(apptJson);
@@ -1210,12 +1239,6 @@ function clearPhantomUnsignedDate(apptId, dateStr) {
     var sheet = ss.getSheetByName(TAB_APPT);
     if (!sheet || sheet.getLastRow() < 2) return JSON.stringify({ ok: true, cleared: 0 });
 
-    var email = Session.getActiveUser().getEmail();
-    var staff = _getStaffRecord(ss, email);
-    if (!staff || staff.role === 'unknown') {
-      return JSON.stringify({ ok: false, error: 'Access denied.' });
-    }
-
     var ID_IDX = APPT_COLS.indexOf('ApptID');         // 0-based
     var DATE_IDX = APPT_COLS.indexOf('Date');           // 0-based
     var PATIENT_IDX = APPT_COLS.indexOf('Patient');        // 0-based
@@ -1234,6 +1257,8 @@ function clearPhantomUnsignedDate(apptId, dateStr) {
     // ── Step 1: Resolve the patient's normalized name from the appointment row ──
     for (var i = 1; i < values.length; i++) {
       if (String(values[i][ID_IDX] || '').trim() === idN) {
+        var denied = _apptWriteDenialJson(ss, values[i][APPT_COLS.indexOf('ProvID')], 'error');
+        if (denied) return denied;
         patientN = _normName(String(values[i][PATIENT_IDX] || ''));
         break;
       }
@@ -2500,6 +2525,8 @@ function saveNoteStatus(apptId, noteStatus) {
 
     for (var i = 1; i < data.length; i++) {
       if (String(data[i][ID_IDX] || '').trim() === String(apptId).trim()) {
+        var denied = _apptWriteDenialJson(ss, data[i][APPT_COLS.indexOf('ProvID')], 'err', true);
+        if (denied) return denied;
         var rowNum = i + 1;
         sheet.getRange(rowNum, NS_IDX + 1).setValue(noteStatus || '');
 
@@ -2559,6 +2586,8 @@ function overrideNoteAttribution(apptId, which, staffEmail) {
 
     for (var i = 1; i < data.length; i++) {
       if (String(data[i][ID_IDX] || '').trim() === String(apptId).trim()) {
+        var denied = _apptWriteDenialJson(ss, data[i][APPT_COLS.indexOf('ProvID')], 'err');
+        if (denied) return denied;
         var oldVal = String(data[i][BY_COL - 1] || '(blank)');
         sheet.getRange(i + 1, BY_COL).setValue(who);
         _audit(ss, 'NOTE_ATTRIBUTION_CORRECTED',
@@ -2726,6 +2755,8 @@ function saveClaimNotes(provId, dateStr, apptId, notes) {
       var r = data[i];
       // Match by ApptID (index 2) — unique identifier — with ProvID (index 0) as guard
       if (String(r[2]) === String(apptId) && String(r[0]) === String(provId)) {
+        var denied = _apptWriteDenialJson(ss, r[0], 'error');
+        if (denied) return denied;
         // ClaimStatusInfo is APPT_COLS index 42 → spreadsheet column 43 (1-based)
         sheet.getRange(i + 1, APPT_COLS.indexOf('ClaimStatusInfo') + 1)
           .setValue(notes || '');
@@ -2925,6 +2956,8 @@ function saveAppointmentStatus(apptId, status) {
     if (!sheet || sheet.getLastRow() < 2) return JSON.stringify({ ok: false });
     var rowNum = _findApptRow(sheet, apptId);
     if (rowNum < 0) return JSON.stringify({ ok: false, err: 'Appointment not found: ' + apptId });
+    var denied = _apptWriteDenialJson(ss, _apptRowProvID(sheet, rowNum), 'err');
+    if (denied) return denied;
 
     sheet.getRange(rowNum, APPT_COLS.indexOf('Status') + 1).setValue(status || '');
     var attrib = _stampAttribution(ss, sheet, rowNum, STATUS_BY_COL, STATUS_AT_COL);
@@ -2974,6 +3007,10 @@ function saveCCEHRCarryForward(apptId, value) {
       if (String(data[i][ID_IDX] || '').trim() === String(apptId).trim()) { triggerRowIdx = i; break; }
     }
     if (triggerRowIdx < 0) return JSON.stringify({ ok: false, err: 'Appointment not found: ' + apptId });
+    // Checked on the clicked row only: the carry-forward below reaches the
+    // patient's other future rows under any provider by design.
+    var denied = _apptWriteDenialJson(ss, data[triggerRowIdx][PROV_IDX], 'err', true);
+    if (denied) return denied;
 
     var patientNorm = _normName(String(data[triggerRowIdx][PATIENT_IDX] || ''));
     var todayStr = _fmtDate(new Date());
@@ -3024,6 +3061,8 @@ function saveClaimStatus(apptId, claimStatus) {
     if (!sheet || sheet.getLastRow() < 2) return JSON.stringify({ ok: false });
     var rowNum = _findApptRow(sheet, apptId);
     if (rowNum < 0) return JSON.stringify({ ok: false, err: 'Appointment not found: ' + apptId });
+    var denied = _apptWriteDenialJson(ss, _apptRowProvID(sheet, rowNum), 'err');
+    if (denied) return denied;
 
     sheet.getRange(rowNum, APPT_COLS.indexOf('ClaimStatus') + 1).setValue(claimStatus || '');
     var attrib = _stampAttribution(ss, sheet, rowNum, CLAIM_STATUS_BY_COL, CLAIM_STATUS_AT_COL);
@@ -3048,6 +3087,8 @@ function saveClaimSubmission(apptId, claimSubmittedDate) {
     if (!sheet || sheet.getLastRow() < 2) return JSON.stringify({ ok: false });
     var rowNum = _findApptRow(sheet, apptId);
     if (rowNum < 0) return JSON.stringify({ ok: false, err: 'Appointment not found: ' + apptId });
+    var denied = _apptWriteDenialJson(ss, _apptRowProvID(sheet, rowNum), 'err');
+    if (denied) return denied;
 
     sheet.getRange(rowNum, APPT_COLS.indexOf('ClaimSubmittedDate') + 1).setValue(claimSubmittedDate || '');
     var attrib = _stampAttribution(ss, sheet, rowNum, CLAIM_SUBMITTED_BY_COL, CLAIM_SUBMITTED_AT_COL);
@@ -3080,6 +3121,8 @@ function saveScrEntry(apptId, scrDataJson, scrFlagNames) {
     if (!sheet || sheet.getLastRow() < 2) return JSON.stringify({ ok: false });
     var rowNum = _findApptRow(sheet, apptId);
     if (rowNum < 0) return JSON.stringify({ ok: false, err: 'Appointment not found: ' + apptId });
+    var denied = _apptWriteDenialJson(ss, _apptRowProvID(sheet, rowNum), 'err', true);
+    if (denied) return denied;
 
     sheet.getRange(rowNum, APPT_COLS.indexOf('ScrData') + 1).setValue(scrDataJson || '');
 
@@ -3120,6 +3163,8 @@ function saveBestRateConfirmed(apptId, confirmed) {
     if (!sheet || sheet.getLastRow() < 2) return JSON.stringify({ ok: false });
     var rowNum = _findApptRow(sheet, apptId);
     if (rowNum < 0) return JSON.stringify({ ok: false, err: 'Appointment not found: ' + apptId });
+    var denied = _apptWriteDenialJson(ss, _apptRowProvID(sheet, rowNum), 'err', true);
+    if (denied) return denied;
 
     sheet.getRange(rowNum, BEST_RATE_CONFIRMED_COL).setValue(!!confirmed);
     var attrib = _stampAttribution(ss, sheet, rowNum, BEST_RATE_CONFIRMED_BY_COL, BEST_RATE_CONFIRMED_AT_COL);
@@ -3145,6 +3190,8 @@ function saveIntake(apptId, value) {
     if (!sheet || sheet.getLastRow() < 2) return JSON.stringify({ ok: false });
     var rowNum = _findApptRow(sheet, apptId);
     if (rowNum < 0) return JSON.stringify({ ok: false, err: 'Appointment not found: ' + apptId });
+    var denied = _apptWriteDenialJson(ss, _apptRowProvID(sheet, rowNum), 'err', true);
+    if (denied) return denied;
 
     sheet.getRange(rowNum, APPT_COLS.indexOf('Intake') + 1).setValue(value);
     var attrib = _stampAttribution(ss, sheet, rowNum, INTAKE_BY_COL, INTAKE_AT_COL);
@@ -3165,6 +3212,8 @@ function saveInsVerified(apptId, value) {
     if (!sheet || sheet.getLastRow() < 2) return JSON.stringify({ ok: false });
     var rowNum = _findApptRow(sheet, apptId);
     if (rowNum < 0) return JSON.stringify({ ok: false, err: 'Appointment not found: ' + apptId });
+    var denied = _apptWriteDenialJson(ss, _apptRowProvID(sheet, rowNum), 'err', true);
+    if (denied) return denied;
 
     sheet.getRange(rowNum, APPT_COLS.indexOf('InsVerified') + 1).setValue(value);
     var attrib = _stampAttribution(ss, sheet, rowNum, INS_VERIFIED_BY_COL, INS_VERIFIED_AT_COL);
@@ -3185,6 +3234,8 @@ function saveAutopay(apptId, value) {
     if (!sheet || sheet.getLastRow() < 2) return JSON.stringify({ ok: false });
     var rowNum = _findApptRow(sheet, apptId);
     if (rowNum < 0) return JSON.stringify({ ok: false, err: 'Appointment not found: ' + apptId });
+    var denied = _apptWriteDenialJson(ss, _apptRowProvID(sheet, rowNum), 'err', true);
+    if (denied) return denied;
 
     sheet.getRange(rowNum, APPT_COLS.indexOf('Autopay') + 1).setValue(value);
     var attrib = _stampAttribution(ss, sheet, rowNum, AUTOPAY_BY_COL, AUTOPAY_AT_COL);
@@ -3205,6 +3256,8 @@ function saveChecklistNote(apptId, note) {
     if (!sheet || sheet.getLastRow() < 2) return JSON.stringify({ ok: false });
     var rowNum = _findApptRow(sheet, apptId);
     if (rowNum < 0) return JSON.stringify({ ok: false, err: 'Appointment not found: ' + apptId });
+    var denied = _apptWriteDenialJson(ss, _apptRowProvID(sheet, rowNum), 'err');
+    if (denied) return denied;
 
     sheet.getRange(rowNum, APPT_COLS.indexOf('ChecklistNote') + 1).setValue(note || '');
     var attrib = _stampAttribution(ss, sheet, rowNum, CHECKLIST_NOTE_BY_COL, CHECKLIST_NOTE_AT_COL);
@@ -3615,6 +3668,8 @@ function savePaymentComment(provId, dateStr, apptId, comment) {
     for (var i = 1; i < data.length; i++) {
       var r = data[i];
       if (String(r[2]) === String(apptId) && String(r[0]) === String(provId)) {
+        var denied = _apptWriteDenialJson(ss, r[0], 'error');
+        if (denied) return denied;
         sheet.getRange(i + 1, PAYMENT_COMMENTS_COL).setValue(comment || '');
         return JSON.stringify({ ok: true });
       }
