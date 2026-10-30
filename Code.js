@@ -698,32 +698,35 @@ var NOT_STAFF_DENIAL = 'Access denied: your account is not set up on the Staff t
 // own. Always checked against the row's ProvID on the sheet (for a new row,
 // the provider it's being created under), never a provider the browser
 // sent for an existing row. Returns '' when allowed, otherwise the reason.
-function _apptAccessDenial(staff, rowProvID) {
+// ownWhat names the rows in the provider refusal: 'appointments' (the
+// default) or 'records' for rows that aren't appointments.
+function _apptAccessDenial(staff, rowProvID, ownWhat) {
   if (!staff || WRITE_ROLES.indexOf(staff.role) < 0) return NOT_STAFF_DENIAL;
   if (staff.role === 'provider' && (!staff.provID || staff.provID !== String(rowProvID || '').trim())) {
-    return 'You can only change your own appointments.';
+    return 'You can only change your own ' + (ownWhat || 'appointments') + '.';
   }
   return '';
 }
 
-// Appointment Flow lets Jodene switch to any provider (the frontend's
-// allowSwitch, userProvID === 'jodene') and use the controls there, so the
-// writers Appointment Flow calls let her change any provider's row (Dean,
-// 2026-10-28). Only those writers pass appointmentFlow to
-// _apptWriteDenialJson; saveAppointment, signing and delete stay strict.
-var APPT_FLOW_ALL_PROVIDERS_PROVID = 'jodene';
-function _apptFlowAccessDenial(staff, rowProvID) {
-  if (staff && staff.role === 'provider' && staff.provID === APPT_FLOW_ALL_PROVIDERS_PROVID) return '';
-  return _apptAccessDenial(staff, rowProvID);
+// Jodene may act on any provider's rows in two places (Dean): the writers
+// Appointment Flow calls, since Appointment Flow lets her switch to any
+// provider (the frontend's allowSwitch, userProvID === 'jodene'), and
+// addPaymentManualEntry, since she adds manual payment entries for other
+// providers. Only those writers pass allProviders to _apptWriteDenialJson;
+// saveAppointment, signing, delete and every other writer stay strict.
+var ALL_PROVIDERS_PROVID = 'jodene';
+function _allProvidersAccessDenial(staff, rowProvID, ownWhat) {
+  if (staff && staff.role === 'provider' && staff.provID === ALL_PROVIDERS_PROVID) return '';
+  return _apptAccessDenial(staff, rowProvID, ownWhat);
 }
 
 // The refusal reply for the current user changing an appointment row whose
 // ProvID is rowProvID, or '' when allowed. errKey is the writer's own error
 // field ('err' or 'error'), so callers keep reading the shape they already
-// read.
-function _apptWriteDenialJson(ss, rowProvID, errKey, appointmentFlow) {
+// read. ownWhat: see _apptAccessDenial.
+function _apptWriteDenialJson(ss, rowProvID, errKey, allProviders, ownWhat) {
   var staff = _getStaffRecord(ss, Session.getActiveUser().getEmail());
-  var denial = appointmentFlow ? _apptFlowAccessDenial(staff, rowProvID) : _apptAccessDenial(staff, rowProvID);
+  var denial = allProviders ? _allProvidersAccessDenial(staff, rowProvID, ownWhat) : _apptAccessDenial(staff, rowProvID, ownWhat);
   if (!denial) return '';
   var reply = { ok: false, accessDenied: true };
   reply[errKey] = denial + ' Nothing was saved.';
@@ -3717,6 +3720,9 @@ function savePaymentManualComment(rowIndex, patient, comment) {
     if (rowPatient.toLowerCase() !== String(patient || '').trim().toLowerCase()) {
       return JSON.stringify({ error: 'Row has moved — refresh and try again' });
     }
+    // This tab stores the provider as a capitalized first name ('Jodene').
+    var denied = _apptWriteDenialJson(ss, String(sheet.getRange(row, 2).getValue() || '').trim().toLowerCase(), 'error', false, 'records');
+    if (denied) return denied;
 
     sheet.getRange(row, 14).setValue(comment || ''); // Comments column
     return JSON.stringify({ ok: true });
@@ -3752,6 +3758,8 @@ function addPaymentManualEntry(entryJson) {
     if (!provID) return JSON.stringify({ error: 'Provider is required' });
 
     var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var denied = _apptWriteDenialJson(ss, provID, 'error', true, 'records');
+    if (denied) return denied;
     var sheet = ss.getSheetByName(TAB_PAYMENT_MANUAL);
     if (!sheet) return JSON.stringify({ error: 'PaymentTrackerManual sheet not found' });
 
