@@ -688,15 +688,18 @@ var BLANK_PROV_UPDATE_ERROR = 'This appointment has no provider in the Appointme
 var BLANK_PROV_CREATE_ERROR = 'No provider is selected, so the appointment was not created. ' +
   'Pick a provider and try again.';
 
+// Roles that may write. Anyone else, including an account not on the
+// Staff tab, is refused.
+var WRITE_ROLES = ['provider', 'assistant', 'biller'];
+var NOT_STAFF_DENIAL = 'Access denied: your account is not set up on the Staff tab.';
+
 // Who may change an appointment row: staff whose role is provider,
 // assistant or biller, and a provider only on rows whose ProvID is their
 // own. Always checked against the row's ProvID on the sheet (for a new row,
 // the provider it's being created under), never a provider the browser
 // sent for an existing row. Returns '' when allowed, otherwise the reason.
 function _apptAccessDenial(staff, rowProvID) {
-  if (!staff || ['provider', 'assistant', 'biller'].indexOf(staff.role) < 0) {
-    return 'Access denied: your account is not set up on the Staff tab.';
-  }
+  if (!staff || WRITE_ROLES.indexOf(staff.role) < 0) return NOT_STAFF_DENIAL;
   if (staff.role === 'provider' && (!staff.provID || staff.provID !== String(rowProvID || '').trim())) {
     return 'You can only change your own appointments.';
   }
@@ -724,6 +727,16 @@ function _apptWriteDenialJson(ss, rowProvID, errKey, appointmentFlow) {
   if (!denial) return '';
   var reply = { ok: false, accessDenied: true };
   reply[errKey] = denial + ' Nothing was saved.';
+  return JSON.stringify(reply);
+}
+
+// The refusal reply for a write that involves no appointment row (the
+// Patients tab), or '' when allowed: any staff role, providers included.
+function _staffWriteDenialJson(ss, errKey) {
+  var staff = _getStaffRecord(ss, Session.getActiveUser().getEmail());
+  if (staff && WRITE_ROLES.indexOf(staff.role) >= 0) return '';
+  var reply = { ok: false, accessDenied: true };
+  reply[errKey] = NOT_STAFF_DENIAL + ' Nothing was saved.';
   return JSON.stringify(reply);
 }
 
@@ -7447,6 +7460,8 @@ function savePatientClaimRecord(patientName, fieldsJson) {
   try {
     var fields = JSON.parse(fieldsJson || '{}');
     var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var denied = _staffWriteDenialJson(ss, 'error');
+    if (denied) return denied;
     var sheet = ss.getSheetByName(TAB_PATIENT);
     if (!sheet || sheet.getLastRow() < 2) {
       return JSON.stringify({ ok: false, error: 'No patient sheet' });
@@ -7616,6 +7631,8 @@ function _getPatientBillingChannelLabel(ss, patientName) {
 function setPatientBillingChannel(patientName, channel) {
   try {
     var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var denied = _staffWriteDenialJson(ss, 'error');
+    if (denied) return denied;
     var sheet = ss.getSheetByName(TAB_PATIENT);
     if (!sheet || sheet.getLastRow() < 2) {
       return JSON.stringify({ ok: false, error: 'No patient sheet' });
